@@ -487,17 +487,41 @@ export type PerformanceGoal = (typeof PERFORMANCE_GOALS)[number];
 export type TrainingFocus = "Endurance" | "Strength" | "Hybrid";
 export type PerformancePriority = "Performance" | "Recovery" | "Longevity";
 
+export type Sex               = "male" | "female" | "other";
+export type ExperienceLevel   = "beginner" | "intermediate" | "advanced";
+export type TrainingIntensity = "low" | "moderate" | "high";
+export type EventImportance   = "A" | "B" | "C";
+
 export interface PerformanceProfile {
+  // Sport & goal
   primaryGoal:    PerformanceGoal;
-  eventDate?:     string | null;          // YYYY-MM-DD — race day, season opener, next game, etc.
   trainingFocus?: TrainingFocus | null;
   priority?:      PerformancePriority | null;
-  /** Optional: sport position or discipline detail, e.g. "Midfielder", "Goalkeeper", "Open Water" */
-  position?:      string | null;
-  /** Approximate weekly training hours — used to calibrate nutrition norms */
-  weeklyHours?:   number | null;          // e.g. 8 for a competitive triathlete
-  /** Body weight in lbs — used for protein/hydration targets */
-  bodyWeightLbs?: number | null;
+  position?:      string | null;           // "Midfielder", "Open Water", "QB", etc.
+
+  // Athlete demographics
+  age?:           number | null;
+  sex?:           Sex | null;
+  heightIn?:      number | null;           // inches
+  bodyWeightLbs?: number | null;           // lbs
+  experienceLevel?: ExperienceLevel | null;
+
+  // Training load
+  weeklyHours?:         number | null;     // hrs/week
+  trainingDaysPerWeek?: number | null;     // 1–7
+  trainingIntensity?:   TrainingIntensity | null;
+
+  // Injury
+  injuryActive?:    boolean;
+  injuryBodyPart?:  string | null;
+  injurySeverity?:  number | null;         // 1–5
+  injuryNotes?:     string | null;
+
+  // Event
+  eventTraining?:   boolean;
+  eventType?:       string | null;         // "Ironman 70.3", "City Marathon", etc.
+  eventDate?:       string | null;         // YYYY-MM-DD
+  eventImportance?: EventImportance | null; // A = priority race, B = tune-up, C = fun
 }
 
 // ─── Store shape ─────────────────────────────────────────────────────────────
