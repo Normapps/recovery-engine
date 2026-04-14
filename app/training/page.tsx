@@ -269,11 +269,15 @@ function PlanUploader({
   // ── Drag-and-drop handlers ─────────────────────────────────────────────────
   function handleDragOver(e: React.DragEvent) {
     e.preventDefault();
+    e.stopPropagation();
     setUploadState("dragging");
   }
 
   function handleDrop(e: React.DragEvent) {
     e.preventDefault();
+    e.stopPropagation();
+    console.log("DROP EVENT FIRED");
+
     setUploadState("idle");
 
     const file = e.dataTransfer.files[0];
@@ -283,8 +287,12 @@ function PlanUploader({
     uploadFile(file);
   }
 
-  function handleDragLeave() {
-    setUploadState("idle");
+  function handleDragLeave(e: React.DragEvent) {
+    // Only reset when the drag actually leaves the drop zone itself,
+    // not when it enters a child element inside it.
+    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+      setUploadState("idle");
+    }
   }
 
   // ── Click / input fallback ─────────────────────────────────────────────────
@@ -303,6 +311,7 @@ function PlanUploader({
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onClick={() => !isProcessing && inputRef.current?.click()}
+        style={{ zIndex: 10, pointerEvents: "auto" }}
         className={`
           relative flex flex-col items-center justify-center gap-3
           rounded-2xl border-2 border-dashed p-10 cursor-pointer
@@ -325,8 +334,9 @@ function PlanUploader({
           disabled={isProcessing}
         />
 
+        {/* pointer-events-none on all inner content so they never intercept drag events */}
         {isProcessing ? (
-          <>
+          <div className="pointer-events-none flex flex-col items-center gap-3">
             <div className="w-10 h-10 rounded-2xl bg-bg-card border border-bg-border flex items-center justify-center animate-pulse">
               <FileText size={20} className="text-text-muted" />
             </div>
@@ -334,9 +344,9 @@ function PlanUploader({
               <p className="text-sm font-semibold text-text-primary">Parsing plan…</p>
               <p className="text-xs text-text-muted mt-1">{fileName}</p>
             </div>
-          </>
+          </div>
         ) : uploadState === "error" ? (
-          <>
+          <div className="pointer-events-none flex flex-col items-center gap-3">
             <div className="w-10 h-10 rounded-2xl bg-recovery-low/10 border border-recovery-low/30 flex items-center justify-center">
               <X size={20} className="text-recovery-low" />
             </div>
@@ -344,15 +354,17 @@ function PlanUploader({
               <p className="text-sm font-semibold text-recovery-low">Upload failed</p>
               <p className="text-xs text-text-muted mt-1">{errorMsg}</p>
             </div>
+            {/* "Try again" needs pointer events restored for clicking */}
             <button
+              style={{ pointerEvents: "auto" }}
               onClick={(e) => { e.stopPropagation(); setUploadState("idle"); setErrorMsg(""); }}
               className="text-xs text-gold hover:text-gold-light transition-colors"
             >
               Try again
             </button>
-          </>
+          </div>
         ) : (
-          <>
+          <div className="pointer-events-none flex flex-col items-center gap-3">
             <div className="w-10 h-10 rounded-2xl bg-bg-card border border-bg-border flex items-center justify-center">
               <Upload size={20} className={uploadState === "dragging" ? "text-gold" : "text-text-muted"} />
             </div>
@@ -362,7 +374,7 @@ function PlanUploader({
               </p>
               <p className="text-xs text-text-muted mt-1">PDF or CSV · click to browse</p>
             </div>
-          </>
+          </div>
         )}
       </div>
 
