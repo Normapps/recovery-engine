@@ -40,7 +40,7 @@ const ORDERED_DAYS: WeekDay[] = [
 const TYPE_KEYWORDS: Array<{ type: TrainingType; keywords: string[] }> = [
   { type: "game",
     keywords: ["game", "match", "competition", "tournament", "meet", "race"] },
-  // cardio: run/bike/swim/row/walk/hike and generic "cardio" keyword
+  // cardio: run/bike/swim/row/walk/hike, generic "cardio", and common run subtypes
   { type: "cardio",
     keywords: ["run", "runs", "running", "jog", "jogging",
                "bike", "biking", "cycle", "cycling",
@@ -48,11 +48,15 @@ const TYPE_KEYWORDS: Array<{ type: TrainingType; keywords: string[] }> = [
                "row", "rowing",
                "walk", "walking",
                "hike", "hiking",
-               "cardio"] },
+               "cardio",
+               // run subtypes — allow planToText output to roundtrip correctly
+               "tempo", "intervals", "fartlek", "long run", "easy run",
+               "progression run", "hills"] },
   { type: "practice",
     keywords: ["practice", "drill", "skill", "team", "session", "training"] },
   { type: "strength",
-    keywords: ["strength", "lift", "weights", "gym", "squat", "bench", "deadlift", "resistance"] },
+    keywords: ["strength", "lift", "weights", "gym", "squat", "bench", "deadlift", "resistance",
+               "upper body", "lower body", "full body", "power", "core"] },
   { type: "recovery",
     keywords: ["recovery", "rest", "easy", "light", "yoga", "stretch", "mobility", "active recovery"] },
   { type: "off",
@@ -96,9 +100,28 @@ const DEFAULT_DURATION: Record<TrainingType, number> = {
 
 function inferIntensity(type: TrainingType, line: string): IntensityLevel {
   const lower = line.toLowerCase();
-  if (lower.includes("high") || lower.includes("heavy") || lower.includes("hard") || lower.includes("max") || lower.includes("tempo") || lower.includes("interval")) return "high";
-  if (lower.includes("low")  || lower.includes("easy")  || lower.includes("light") || lower.includes("recovery") || lower.includes("jog")) return "low";
-  if (type === "game") return "high";
+  // High intensity markers
+  if (
+    lower.includes("high")     ||
+    lower.includes("heavy")    ||
+    lower.includes("hard")     ||
+    lower.includes("max")      ||
+    lower.includes("interval") ||
+    lower.includes("sprint")   ||
+    lower.includes("race")
+  ) return "high";
+  // Moderate — tempo sits between easy and max effort
+  if (lower.includes("tempo") || lower.includes("threshold") || lower.includes("fartlek")) return "moderate";
+  // Low intensity markers
+  if (
+    lower.includes("low")      ||
+    lower.includes("easy")     ||
+    lower.includes("light")    ||
+    lower.includes("recovery") ||
+    lower.includes("jog")      ||
+    lower.includes("long run")  // long runs are typically easy/moderate pace
+  ) return "low";
+  if (type === "game")                       return "high";
   if (type === "recovery" || type === "off") return "low";
   return "moderate";
 }
@@ -168,6 +191,98 @@ function buildCardioNotes(rest: string): string | undefined {
   return undefined; // pure "cardio" keyword, no extra context
 }
 
+// ─── Structured distance extraction ──────────────────────────────────────────
+
+/** Returns a numeric distance and its unit, or null for time-based sessions. */
+function extractDistanceNumeric(
+  text: string
+): { distance: number; distanceUnit: "mi" | "km" } | null {
+  const miles = text.match(/(\d+(?:\.\d+)?)\s*mi(?:les?)?(?!\w)/i);
+  if (miles) return { distance: parseFloat(miles[1]), distanceUnit: "mi" };
+
+  const km = text.match(/(\d+(?:\.\d+)?)\s*k(?:m|ilometers?)?(?!\w)/i);
+  if (km) return { distance: parseFloat(km[1]), distanceUnit: "km" };
+
+  if (/half[\s-]?marathon/i.test(text)) return { distance: 13.1, distanceUnit: "mi" };
+  if (/\bmarathon\b/i.test(text))       return { distance: 26.2, distanceUnit: "mi" };
+
+  return null;
+}
+
+// ─── Subtype inference ────────────────────────────────────────────────────────
+
+/**
+ * Infers a human-readable sub-classification within the training type.
+ *
+ * Examples:
+ *   cardio + "tempo run 45min"   → "Tempo Run"
+ *   cardio + "long run 15 mi"    → "Long Run"
+ *   cardio + "easy jog"          → "Easy Run"
+ *   cardio + "interval 800s"     → "Intervals"
+ *   cardio + "bike 1h"           → "Bike"
+ *   strength + "upper body"      → "Upper Body"
+ *   strength + "lower body 45"   → "Lower Body"
+ *   recovery + "yoga"            → "Yoga"
+ *   recovery + "active recovery" → "Active Recovery"
+ */
+function inferSubtype(type: TrainingType, line: string): string | undefined {
+  switch (type) {
+    case "cardio": {
+      // Check variant first, then fall back to activity label
+      if (/\bintervals?\b|\b800s?\b|\b400s?\b|\brepeat/i.test(line))   return "Intervals";
+      if (/\btempo\b|\bthreshold\b/i.test(line))                        return "Tempo Run";
+      if (/\blong\s*run\b/i.test(line))                                 return "Long Run";
+      if (/\bprogression\b/i.test(line))                                return "Progression Run";
+      if (/\bfartlek\b/i.test(line))                                    return "Fartlek";
+      if (/\bhills?\b/i.test(line))                                     return "Hill Run";
+      if (/\beasy\s*run\b|\brecovery\s*run\b/i.test(line))             return "Easy Run";
+      if (/\beasy\b|\bjog\b/i.test(line))                               return "Easy Run";
+      // Activity-level subtypes when no variant found
+      const activity = extractCardioActivity(line);
+      return activity ?? undefined; // "Run", "Bike", "Swim", "Row", "Walk", "Hike"
+    }
+
+    case "strength": {
+      if (/\bfull[\s-]?body\b/i.test(line))                            return "Full Body";
+      if (/\bupper[\s-]?body\b|\bupper\b/i.test(line))                 return "Upper Body";
+      if (/\blower[\s-]?body\b|\blower\b|\blegs?\b/i.test(line))       return "Lower Body";
+      if (/\bpower\b|\bolympic\b|\bclean\b|\bsnatch\b/i.test(line))    return "Power";
+      if (/\bcore\b|\babs?\b/i.test(line))                             return "Core";
+      if (/\bpull[\s-]?day\b/i.test(line))                             return "Pull Day";
+      if (/\bpush[\s-]?day\b/i.test(line))                             return "Push Day";
+      return undefined;
+    }
+
+    case "practice": {
+      if (/\bscrimmage\b/i.test(line))                                  return "Scrimmage";
+      if (/\bdrills?\b/i.test(line))                                    return "Drills";
+      if (/\bskill\b/i.test(line))                                      return "Skill Work";
+      if (/\btactics?\b|\bfilm\b/i.test(line))                          return "Tactics";
+      return undefined;
+    }
+
+    case "recovery": {
+      if (/\byoga\b/i.test(line))                                       return "Yoga";
+      if (/\bactive\s*recovery\b/i.test(line))                         return "Active Recovery";
+      if (/\bmobilit/i.test(line))                                      return "Mobility";
+      if (/\bstretch/i.test(line))                                      return "Stretching";
+      if (/\bwalk\b/i.test(line))                                       return "Walk";
+      if (/\bswim\b/i.test(line))                                       return "Easy Swim";
+      return undefined;
+    }
+
+    case "game": {
+      if (/\bscrimmage\b/i.test(line))                                  return "Scrimmage";
+      if (/\btournament\b/i.test(line))                                 return "Tournament";
+      if (/\brace\b|\bmeet\b/i.test(line))                             return "Race";
+      return undefined;
+    }
+
+    default:
+      return undefined;
+  }
+}
+
 // ─── Line parser ─────────────────────────────────────────────────────────────
 
 function parseLine(line: string): { day: WeekDay; entry: Omit<TrainingDay, "day"> } | null {
@@ -188,7 +303,11 @@ function parseLine(line: string): { day: WeekDay; entry: Omit<TrainingDay, "day"
   const duration       = rawDuration > 0 ? rawDuration : DEFAULT_DURATION[training_type];
   const intensity      = inferIntensity(training_type, rest);
 
-  // Build notes: only set for cardio entries; captures activity label + distance
+  // Structured fields
+  const subtype        = inferSubtype(training_type, rest);
+  const distResult     = extractDistanceNumeric(rest);
+
+  // Legacy notes: only set for cardio; captures activity label + distance string
   const notes = training_type === "cardio" ? buildCardioNotes(rest) : undefined;
 
   return {
@@ -197,7 +316,12 @@ function parseLine(line: string): { day: WeekDay; entry: Omit<TrainingDay, "day"
       training_type,
       duration,
       intensity,
-      ...(notes !== undefined ? { notes } : {}),
+      ...(notes     !== undefined ? { notes }                          : {}),
+      ...(subtype   !== undefined ? { subtype }                        : {}),
+      ...(distResult !== null     ? {
+        distance:     distResult.distance,
+        distanceUnit: distResult.distanceUnit,
+      } : {}),
     },
   };
 }
@@ -221,13 +345,14 @@ export function parseTrainingInput(
   const base = new Map<WeekDay, Omit<TrainingDay, "day">>();
   if (existingPlan) {
     for (const d of existingPlan.weeklySchedule) {
-      // Preserve notes (activity/distance) from the existing plan so they
-      // are not silently dropped when the user re-saves without retyping them.
       base.set(d.day, {
         training_type: d.training_type,
         duration:      d.duration,
         intensity:     d.intensity,
-        ...(d.notes !== undefined ? { notes: d.notes } : {}),
+        ...(d.notes        !== undefined ? { notes:        d.notes        } : {}),
+        ...(d.subtype      !== undefined ? { subtype:      d.subtype      } : {}),
+        ...(d.distance     !== undefined ? { distance:     d.distance     } : {}),
+        ...(d.distanceUnit !== undefined ? { distanceUnit: d.distanceUnit } : {}),
       });
     }
   }
@@ -277,27 +402,34 @@ export function planToText(plan: TrainingPlan): string {
     .map((d) => {
       if (d.training_type === "off") return `${d.day} - Off`;
 
+      // ── Cardio ─────────────────────────────────────────────────────────────
       if (d.training_type === "cardio") {
-        if (d.notes) {
-          // notes already contains the activity label (and optional distance).
-          // Include duration only when the notes are purely a label (no digits),
-          // i.e., distance-based workouts don't append a redundant "45min".
-          const notesHasQuantity = /\d/.test(d.notes);
-          const durStr = (!notesHasQuantity && d.duration > 0)
-            ? ` ${formatDuration(d.duration)}`
-            : "";
-          return `${d.day} - ${d.notes}${durStr}`;
+        // Build the display label: prefer structured subtype, fall back to notes
+        const label = d.subtype ?? (d.notes ? d.notes.split(" ")[0] : null) ?? "Cardio";
+
+        // Distance takes precedence over duration for distance-based workouts
+        if (d.distance !== undefined) {
+          const unit = d.distanceUnit ?? "mi";
+          return `${d.day} - ${label} ${d.distance} ${unit}`;
         }
-        // Generic cardio with no specific activity — output type label + duration
+
+        // Time-based cardio — include subtype keyword so it roundtrips correctly
         const durStr = d.duration > 0 ? ` ${formatDuration(d.duration)}` : "";
-        return `${d.day} - Cardio${durStr}`;
+        return `${d.day} - ${label}${durStr}`;
       }
 
-      const durStr = d.duration > 0 ? ` ${formatDuration(d.duration)}` : "";
+      // ── Non-cardio ─────────────────────────────────────────────────────────
+      const typeLabel = d.subtype ?? TYPE_LABEL[d.training_type];
+      const durStr    = d.duration > 0 ? ` ${formatDuration(d.duration)}` : "";
+      // Emit intensity tag only when it deviates from the default for that type
+      const defaultIntensity: IntensityLevel =
+        d.training_type === "game"     ? "high" :
+        d.training_type === "recovery" ? "low"  : "moderate";
       const intStr =
-        d.intensity === "high" ? " high" :
-        d.intensity === "low"  ? " low"  : "";
-      return `${d.day} - ${TYPE_LABEL[d.training_type]}${durStr}${intStr}`;
+        d.intensity !== defaultIntensity
+          ? (d.intensity === "high" ? " high" : d.intensity === "low" ? " low" : "")
+          : "";
+      return `${d.day} - ${typeLabel}${durStr}${intStr}`;
     })
     .join("\n");
 }

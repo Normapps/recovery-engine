@@ -31,12 +31,14 @@ const DAY_ABBR: Record<WeekDay, string> = {
 
 function TypeBadge({ day }: { day: TrainingDay }) {
   const color = TYPE_COLOR[day.training_type];
+  // Prefer subtype (e.g. "Tempo Run") over generic label (e.g. "Cardio")
+  const label = day.subtype ?? TYPE_LABEL[day.training_type];
   return (
     <span
       className="text-2xs font-bold px-2 py-0.5 rounded-full uppercase tracking-wide"
       style={{ backgroundColor: `${color}20`, color }}
     >
-      {TYPE_LABEL[day.training_type]}
+      {label}
     </span>
   );
 }
@@ -71,13 +73,22 @@ function DayCard({
       {day.training_type === "off" ? (
         <p className="text-sm text-text-muted">Rest day — no training scheduled.</p>
       ) : (
-        <div className="flex items-center gap-6">
+        <div className="flex items-center gap-6 flex-wrap">
+          {/* Distance (when available) OR duration */}
           <div className="flex items-center gap-2">
             <Clock size={13} className="text-text-muted" />
             <span className="text-sm font-semibold text-text-primary">
-              {formatDuration(day.duration)}
+              {day.distance !== undefined
+                ? `${day.distance} ${day.distanceUnit ?? "mi"}`
+                : formatDuration(day.duration)}
             </span>
           </div>
+          {/* Show duration alongside distance when both present */}
+          {day.distance !== undefined && day.duration > 0 && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-text-muted">{formatDuration(day.duration)}</span>
+            </div>
+          )}
           <div className="flex items-center gap-2">
             <Flame size={13} className="text-text-muted" />
             <span className="text-sm font-semibold text-text-primary capitalize">
@@ -134,7 +145,7 @@ function WeekStrip({
               }}
             >
               <span className="text-2xs font-bold" style={{ color }}>
-                {d.training_type === "off" ? "—" : TYPE_LABEL[d.training_type][0]}
+                {d.training_type === "off" ? "—" : (d.subtype ?? TYPE_LABEL[d.training_type])[0]}
               </span>
             </div>
             {d.training_type !== "off" && (
@@ -566,10 +577,12 @@ export default function TrainingPage() {
                   {d.day.slice(0, 3)}{isToday && <span className="text-2xs ml-1 text-gold/70">TODAY</span>}
                 </span>
                 <span className="flex-1 text-sm font-semibold text-text-primary">
-                  {TYPE_LABEL[d.training_type]}
+                  {d.subtype ?? TYPE_LABEL[d.training_type]}
                 </span>
                 <span className="text-xs text-text-muted tabular-nums">
-                  {formatDuration(d.duration)}
+                  {d.distance !== undefined
+                    ? `${d.distance} ${d.distanceUnit ?? "mi"}`
+                    : formatDuration(d.duration)}
                 </span>
               </div>
             );

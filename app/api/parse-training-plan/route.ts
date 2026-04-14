@@ -11,11 +11,19 @@ const TRAINING_TYPES: TrainingType[] = [
   "strength", "practice", "game", "recovery", "cardio", "off",
 ];
 const INTENSITY_LEVELS: IntensityLevel[] = ["low", "moderate", "high"];
+const DISTANCE_UNITS = ["mi", "km"] as const;
 
 function clampDuration(d: unknown): number {
   const n = typeof d === "number" ? d : parseInt(String(d ?? 0), 10);
   if (isNaN(n) || n < 0) return 0;
   return Math.min(Math.max(n, 0), 300);
+}
+
+function clampDistance(d: unknown): number | undefined {
+  if (d === null || d === undefined || d === "") return undefined;
+  const n = typeof d === "number" ? d : parseFloat(String(d));
+  if (isNaN(n) || n <= 0) return undefined;
+  return Math.min(n, 1000);
 }
 
 function validateDay(raw: unknown): TrainingDay | null {
@@ -30,12 +38,23 @@ function validateDay(raw: unknown): TrainingDay | null {
   if (!TRAINING_TYPES.includes(training_type as TrainingType)) return null;
   if (!INTENSITY_LEVELS.includes(intensity as IntensityLevel)) return null;
 
+  const distance     = clampDistance(r.distance);
+  const rawUnit      = typeof r.distanceUnit === "string" ? r.distanceUnit.toLowerCase() : null;
+  const distanceUnit = rawUnit && (DISTANCE_UNITS as readonly string[]).includes(rawUnit)
+    ? (rawUnit as "mi" | "km")
+    : (distance !== undefined ? "mi" : undefined);
+
+  const subtypeRaw  = typeof r.subtype === "string" && r.subtype.trim() ? r.subtype.trim() : undefined;
+
   return {
     day:           day as WeekDay,
     training_type: training_type as TrainingType,
     duration:      clampDuration(r.duration),
     intensity:     intensity as IntensityLevel,
     notes:         typeof r.notes === "string" && r.notes ? r.notes : undefined,
+    ...(subtypeRaw   !== undefined ? { subtype: subtypeRaw }       : {}),
+    ...(distance     !== undefined ? { distance }                   : {}),
+    ...(distanceUnit !== undefined ? { distanceUnit }               : {}),
   };
 }
 
@@ -108,20 +127,40 @@ export async function POST(req: NextRequest) {
   }
 
   // ── Parse with Claude ───────────────────────────────────────────────────────
-  const prompt = `You are a training schedule parser for athletes.
+  const prompt = `You are a structured training schedule parser for athletes.
 
-Extract a 7-day weekly training plan from the text below and return ONLY a valid JSON array of exactly 7 objects — one per day, Monday through Sunday.
+Extract a 7-day weekly training plan from the text below. Return ONLY a valid JSON array of exactly 7 objects — one per day, Monday through Sunday. No markdown, no explanation.
 
 Each object must have these fields:
+
+REQUIRED:
 - "day": one of "Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"
-- "training_type": one of "strength","practice","game","recovery","cardio","off"
-- "duration": integer minutes (0 for off days; estimate if not stated — typical session 45–120 min)
-- "intensity": one of "low","moderate","high" ("low" for recovery/off, "moderate" for practice/cardio, "high" for games/heavy lifting)
-- "notes": short optional string describing the session focus (omit if nothing useful to add)
+- "training_type": category — one of "strength","practice","game","recovery","cardio","off"
+  · Run/Bike/Swim/Row → "cardio"
+  · Lift/Weights/Gym → "strength"
+  · Team session/Drill → "practice"
+  · Competition/Race/Match → "game"
+  · Yoga/Stretch/Mobility/Easy → "recovery"
+  · Rest/Nothing → "off"
+- "duration": integer minutes (0 for off days; estimate if unstated — typical: strength 60, cardio 45, practice 90, game 120)
+- "intensity": one of "low","moderate","high"
+  · Easy Run / Jog / Walk / Yoga → "low"
+  · Long Run / Tempo / Threshold / Moderate cardio / Practice → "moderate"
+  · Intervals / Sprints / Race / Heavy lift / Game → "high"
+
+OPTIONAL (omit when not applicable or unknown):
+- "subtype": specific session variant — examples:
+    cardio    → "Easy Run" | "Tempo Run" | "Long Run" | "Intervals" | "Fartlek" | "Hill Run" | "Progression Run" | "Bike" | "Swim" | "Row"
+    strength  → "Upper Body" | "Lower Body" | "Full Body" | "Power" | "Core" | "Push Day" | "Pull Day"
+    practice  → "Drills" | "Skill Work" | "Scrimmage" | "Tactics"
+    recovery  → "Yoga" | "Mobility" | "Stretching" | "Active Recovery" | "Walk"
+    game      → "Race" | "Tournament" | "Scrimmage"
+- "distance": numeric distance value (omit for time-based sessions)
+- "distanceUnit": "mi" or "km" (required if distance is set; default "mi")
 
 Rules:
-- Include ALL 7 days. Days not mentioned → training_type "off", duration 0, intensity "low"
-- No markdown. No explanation. Return ONLY the raw JSON array.
+- ALL 7 days must be present. Days not mentioned → training_type "off", duration 0, intensity "low"
+- Return ONLY the raw JSON array.
 - Cap duration at 300 minutes.
 
 Text to parse:

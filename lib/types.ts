@@ -335,9 +335,12 @@ export type WeekDay =
 export interface TrainingDay {
   day:           WeekDay;
   training_type: TrainingType;
-  duration:      number;       // minutes (0 for off days)
+  duration:      number;          // minutes (0 for off days)
   intensity:     IntensityLevel;
-  notes?:        string;
+  notes?:        string;          // legacy: display label, e.g. "Run 15 mi"
+  subtype?:      string;          // structured variant, e.g. "Tempo", "Long Run", "Upper Body"
+  distance?:     number;          // numeric distance value
+  distanceUnit?: "mi" | "km";    // unit for distance (default "mi")
 }
 
 export interface TrainingPlan {
