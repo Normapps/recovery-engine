@@ -6,6 +6,7 @@ import { ArrowLeft, Check, Target } from "lucide-react";
 import { useStore } from "@/lib/store";
 import {
   PERFORMANCE_GOALS,
+  GOAL_ARCHETYPE,
   type PerformanceGoal,
   type TrainingFocus,
   type PerformancePriority,
@@ -17,16 +18,47 @@ const TRAINING_FOCUSES: TrainingFocus[] = ["Endurance", "Strength", "Hybrid"];
 const PRIORITIES: PerformancePriority[] = ["Performance", "Recovery", "Longevity"];
 
 const GOAL_ICONS: Record<PerformanceGoal, string> = {
+  // Team sports
+  "Soccer":              "⚽",
+  "Basketball":          "🏀",
+  "Football":            "🏈",
+  "Baseball / Softball": "⚾",
+  "Volleyball":          "🏐",
+  "Hockey":              "🏒",
+  "Rugby / Lacrosse":    "🏉",
+  // Endurance
   "Marathon":            "🏃",
   "Half Marathon":       "🏃",
+  "Trail Running":       "🏔️",
   "Triathlon":           "🏊",
   "Ironman":             "🔱",
   "Cycling Race":        "🚴",
+  "Swimming":            "🏊",
+  "Rowing":              "🚣",
+  // Strength / Combat
   "Strength Training":   "🏋️",
   "Powerlifting":        "🏋️",
   "MMA / Combat Sports": "🥊",
+  "CrossFit":            "🔥",
+  "Rock Climbing":       "🧗",
+  // Lifestyle
   "General Fitness":     "⚡",
+  "Weekend Warrior":     "🎯",
   "Longevity":           "🌿",
+};
+
+/** Sport positions or disciplines relevant to each goal */
+const GOAL_POSITIONS: Partial<Record<PerformanceGoal, string[]>> = {
+  "Soccer":          ["Forward", "Midfielder", "Defender", "Goalkeeper", "Wing Back"],
+  "Basketball":      ["Point Guard", "Shooting Guard", "Small Forward", "Power Forward", "Center"],
+  "Football":        ["QB", "RB", "WR", "TE", "OL", "DL", "LB", "DB", "K/P"],
+  "Volleyball":      ["Setter", "Outside Hitter", "Middle Blocker", "Libero", "Opposite"],
+  "Hockey":          ["Forward", "Defenseman", "Goalie"],
+  "Rugby / Lacrosse":["Attack", "Midfield", "Defense", "Goalie"],
+  "Triathlon":       ["Sprint", "Olympic", "70.3 / Half", "Ironman", "Open Water"],
+  "Swimming":        ["Freestyle", "Backstroke", "Breaststroke", "Butterfly", "IM", "Open Water"],
+  "Rowing":          ["Sweep", "Sculling", "Ergometer"],
+  "Rock Climbing":   ["Sport", "Trad", "Boulder", "Gym"],
 };
 
 export default function ProfilePage() {
@@ -37,15 +69,29 @@ export default function ProfilePage() {
   const [eventDate,      setEventDate]      = useState(saved?.eventDate ?? "");
   const [trainingFocus,  setTrainingFocus]  = useState<TrainingFocus | "">(saved?.trainingFocus ?? "");
   const [priority,       setPriority]       = useState<PerformancePriority | "">(saved?.priority ?? "");
+  const [position,       setPosition]       = useState<string>(saved?.position ?? "");
+  const [weeklyHours,    setWeeklyHours]    = useState<string>(saved?.weeklyHours?.toString() ?? "");
+  const [bodyWeightLbs,  setBodyWeightLbs]  = useState<string>(saved?.bodyWeightLbs?.toString() ?? "");
   const [saved_ok,       setSavedOk]        = useState(false);
+
+  // Group goals by archetype category for cleaner UI
+  const TEAM_SPORTS:  PerformanceGoal[] = ["Soccer","Basketball","Football","Baseball / Softball","Volleyball","Hockey","Rugby / Lacrosse"];
+  const ENDURANCE:    PerformanceGoal[] = ["Marathon","Half Marathon","Trail Running","Triathlon","Ironman","Cycling Race","Swimming","Rowing"];
+  const STRENGTH:     PerformanceGoal[] = ["Strength Training","Powerlifting","MMA / Combat Sports","CrossFit","Rock Climbing"];
+  const LIFESTYLE:    PerformanceGoal[] = ["General Fitness","Weekend Warrior","Longevity"];
+
+  const positionOptions = primaryGoal ? (GOAL_POSITIONS[primaryGoal as PerformanceGoal] ?? []) : [];
 
   function handleSave() {
     if (!primaryGoal) return;
     const profile: PerformanceProfile = {
       primaryGoal,
-      eventDate:     eventDate   || null,
-      trainingFocus: (trainingFocus as TrainingFocus) || null,
-      priority:      (priority    as PerformancePriority) || null,
+      eventDate:      eventDate          || null,
+      trainingFocus:  (trainingFocus as TrainingFocus) || null,
+      priority:       (priority    as PerformancePriority) || null,
+      position:       position           || null,
+      weeklyHours:    weeklyHours        ? parseFloat(weeklyHours)   : null,
+      bodyWeightLbs:  bodyWeightLbs      ? parseFloat(bodyWeightLbs) : null,
     };
     setPerformanceProfile(profile);
     setSavedOk(true);
@@ -58,6 +104,9 @@ export default function ProfilePage() {
     setEventDate("");
     setTrainingFocus("");
     setPriority("");
+    setPosition("");
+    setWeeklyHours("");
+    setBodyWeightLbs("");
   }
 
   return (
@@ -82,45 +131,77 @@ export default function ProfilePage() {
         </p>
       </div>
 
-      {/* Primary goal */}
+      {/* Primary goal — grouped by category */}
       <section>
         <h2 className="text-xs font-bold text-text-secondary uppercase tracking-widest mb-3">
-          Primary Goal <span className="text-gold">*</span>
+          Your Sport / Goal <span className="text-gold">*</span>
         </h2>
-        <div className="grid grid-cols-2 gap-2">
-          {PERFORMANCE_GOALS.map((goal) => {
-            const active = primaryGoal === goal;
-            return (
-              <button
-                key={goal}
-                onClick={() => setPrimaryGoal(goal)}
-                className={`flex items-center gap-2.5 p-3 rounded-xl border text-left transition-all ${
-                  active
-                    ? "border-gold/60 bg-gold/10"
-                    : "border-bg-border bg-bg-card hover:border-text-muted/40"
-                }`}
-              >
-                <span className="text-base leading-none">{GOAL_ICONS[goal]}</span>
-                <span
-                  className={`text-xs font-semibold leading-tight ${
-                    active ? "text-gold" : "text-text-secondary"
+
+        {[
+          { label: "Team Sports",  goals: TEAM_SPORTS  },
+          { label: "Endurance",    goals: ENDURANCE    },
+          { label: "Strength & Combat", goals: STRENGTH },
+          { label: "Lifestyle",    goals: LIFESTYLE    },
+        ].map(({ label, goals }) => (
+          <div key={label} className="mb-4">
+            <p className="text-[10px] font-bold text-text-muted uppercase tracking-widest mb-2">{label}</p>
+            <div className="grid grid-cols-2 gap-1.5">
+              {goals.map((goal) => {
+                const active = primaryGoal === goal;
+                return (
+                  <button
+                    key={goal}
+                    onClick={() => { setPrimaryGoal(goal); setPosition(""); }}
+                    className={`flex items-center gap-2 p-3 rounded-xl border text-left transition-all ${
+                      active
+                        ? "border-gold/60 bg-gold/10"
+                        : "border-bg-border bg-bg-card hover:border-text-muted/40"
+                    }`}
+                  >
+                    <span className="text-base leading-none">{GOAL_ICONS[goal]}</span>
+                    <span className={`text-xs font-semibold leading-tight flex-1 ${active ? "text-gold" : "text-text-secondary"}`}>
+                      {goal}
+                    </span>
+                    {active && <Check size={11} className="text-gold shrink-0" />}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </section>
+
+      {/* Position / Discipline (conditional) */}
+      {positionOptions.length > 0 && (
+        <section>
+          <h2 className="text-xs font-bold text-text-secondary uppercase tracking-widest mb-3">
+            Position / Discipline <span className="text-text-muted font-normal normal-case tracking-normal">(optional)</span>
+          </h2>
+          <div className="flex flex-wrap gap-2">
+            {positionOptions.map((pos) => {
+              const active = position === pos;
+              return (
+                <button
+                  key={pos}
+                  onClick={() => setPosition(active ? "" : pos)}
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all ${
+                    active
+                      ? "border-gold/60 bg-gold/10 text-gold"
+                      : "border-bg-border bg-bg-card text-text-secondary hover:border-text-muted/40"
                   }`}
                 >
-                  {goal}
-                </span>
-                {active && (
-                  <Check size={12} className="text-gold ml-auto shrink-0" />
-                )}
-              </button>
-            );
-          })}
-        </div>
-      </section>
+                  {pos}
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       {/* Event date */}
       <section>
         <h2 className="text-xs font-bold text-text-muted uppercase tracking-widest mb-2">
-          Event Date <span className="text-text-muted font-normal normal-case tracking-normal">(optional)</span>
+          Next Race / Event / Season Start <span className="text-text-muted font-normal normal-case tracking-normal">(optional)</span>
         </h2>
         <input
           type="date"
@@ -130,9 +211,50 @@ export default function ProfilePage() {
         />
         {eventDate && (
           <p className="text-xs text-text-secondary mt-1.5 pl-1">
-            The AI will factor proximity to your event when calibrating recommendations.
+            Your dashboard will show a countdown — and the AI calibrates taper recommendations as you get closer.
           </p>
         )}
+      </section>
+
+      {/* Training volume + body weight */}
+      <section>
+        <h2 className="text-xs font-bold text-text-secondary uppercase tracking-widest mb-3">
+          Training Volume <span className="text-text-muted font-normal normal-case tracking-normal">(optional — improves nutrition targets)</span>
+        </h2>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs text-text-muted font-medium block mb-1.5">Weekly Hours</label>
+            <div className="flex items-center gap-2 bg-bg-elevated border border-bg-border rounded-xl px-3 py-2.5">
+              <input
+                type="number"
+                min={1}
+                max={40}
+                step={0.5}
+                value={weeklyHours}
+                placeholder="8"
+                onChange={(e) => setWeeklyHours(e.target.value)}
+                className="flex-1 bg-transparent text-sm text-text-primary outline-none placeholder-text-muted tabular-nums"
+              />
+              <span className="text-xs text-text-muted shrink-0">hrs/wk</span>
+            </div>
+          </div>
+          <div>
+            <label className="text-xs text-text-muted font-medium block mb-1.5">Body Weight</label>
+            <div className="flex items-center gap-2 bg-bg-elevated border border-bg-border rounded-xl px-3 py-2.5">
+              <input
+                type="number"
+                min={80}
+                max={400}
+                step={1}
+                value={bodyWeightLbs}
+                placeholder="175"
+                onChange={(e) => setBodyWeightLbs(e.target.value)}
+                className="flex-1 bg-transparent text-sm text-text-primary outline-none placeholder-text-muted tabular-nums"
+              />
+              <span className="text-xs text-text-muted shrink-0">lbs</span>
+            </div>
+          </div>
+        </div>
       </section>
 
       {/* Training focus */}
@@ -194,10 +316,21 @@ export default function ProfilePage() {
             Active Profile
           </p>
           <div className="flex flex-col gap-1.5">
-            <ProfileRow label="Goal"    value={`${GOAL_ICONS[saved.primaryGoal]} ${saved.primaryGoal}`} />
-            {saved.trainingFocus && <ProfileRow label="Focus"   value={saved.trainingFocus} />}
-            {saved.priority      && <ProfileRow label="Priority" value={saved.priority} />}
-            {saved.eventDate     && <ProfileRow label="Event"   value={saved.eventDate} />}
+            <ProfileRow label="Sport / Goal" value={`${GOAL_ICONS[saved.primaryGoal]} ${saved.primaryGoal}`} />
+            {saved.position       && <ProfileRow label="Position"    value={saved.position} />}
+            {saved.trainingFocus  && <ProfileRow label="Focus"       value={saved.trainingFocus} />}
+            {saved.priority       && <ProfileRow label="Priority"    value={saved.priority} />}
+            {saved.weeklyHours    && <ProfileRow label="Volume"      value={`${saved.weeklyHours} hrs/wk`} />}
+            {saved.bodyWeightLbs  && <ProfileRow label="Body Weight" value={`${saved.bodyWeightLbs} lbs`} />}
+            {saved.eventDate      && (
+              <ProfileRow
+                label="Next Event"
+                value={(() => {
+                  const days = Math.ceil((new Date(saved.eventDate + "T12:00:00").getTime() - Date.now()) / 86400000);
+                  return days > 0 ? `${saved.eventDate} (${days}d away)` : saved.eventDate;
+                })()}
+              />
+            )}
           </div>
         </div>
       )}

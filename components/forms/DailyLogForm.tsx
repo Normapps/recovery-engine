@@ -5,8 +5,8 @@ import { format } from "date-fns";
 import { useStore, useLatestBloodwork } from "@/lib/store";
 import { computeFinalRecoveryScore } from "@/lib/final-scorer";
 import { getTodayDay, getTomorrowDay, getDayPlan } from "@/lib/training-engine";
-import type { DailyEntry, SleepData, NutritionData, TrainingData, RecoveryModalities } from "@/lib/types";
-import { Moon, Zap, Dumbbell, Droplets, Flame, Wind } from "lucide-react";
+import type { DailyEntry, SleepData, NutritionData, TrainingData, RecoveryModalities, SorenessRating, EnergyRating } from "@/lib/types";
+import { Moon, Zap, Dumbbell, Droplets, Wind, Activity } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 // ─── Reusable field components ────────────────────────────────────────────────
@@ -141,6 +141,116 @@ function Toggle({
   );
 }
 
+// ─── Soreness picker ─────────────────────────────────────────────────────────
+
+const SORENESS_LABELS: Record<number, string> = {
+  1: "None",
+  2: "Mild",
+  3: "Moderate",
+  4: "Significant",
+  5: "Severe",
+};
+
+const SORENESS_COLORS: Record<number, string> = {
+  1: "#22C55E",
+  2: "#84CC16",
+  3: "#F59E0B",
+  4: "#EF4444",
+  5: "#DC2626",
+};
+
+function SorenessPicker({
+  value,
+  onChange,
+}: {
+  value: SorenessRating | null;
+  onChange: (v: SorenessRating) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-2">
+      <label className="text-xs text-text-secondary font-medium uppercase tracking-wider">
+        Muscle Soreness
+      </label>
+      <div className="flex gap-1.5">
+        {([1, 2, 3, 4, 5] as SorenessRating[]).map((n) => {
+          const active = value === n;
+          const color  = SORENESS_COLORS[n];
+          return (
+            <button
+              key={n}
+              onClick={() => onChange(n)}
+              className={`flex-1 flex flex-col items-center gap-1 py-2.5 rounded-xl border text-xs font-bold transition-all ${
+                active ? "" : "border-bg-border bg-bg-elevated hover:border-text-muted/30"
+              }`}
+              style={active ? { borderColor: `${color}60`, backgroundColor: `${color}15`, color } : { color: "#6B7280" }}
+            >
+              <span className="tabular-nums text-sm">{n}</span>
+              <span className="text-[9px] uppercase tracking-wide leading-none opacity-80">
+                {SORENESS_LABELS[n]}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── Energy picker ────────────────────────────────────────────────────────────
+
+const ENERGY_LABELS: Record<number, string> = {
+  1: "Depleted",
+  2: "Low",
+  3: "Moderate",
+  4: "Good",
+  5: "Excellent",
+};
+
+const ENERGY_EMOJI: Record<number, string> = {
+  1: "🪫",
+  2: "😴",
+  3: "😐",
+  4: "⚡",
+  5: "🔥",
+};
+
+function EnergyPicker({
+  value,
+  onChange,
+}: {
+  value: EnergyRating | null;
+  onChange: (v: EnergyRating) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-2">
+      <label className="text-xs text-text-secondary font-medium uppercase tracking-wider">
+        Energy Level
+      </label>
+      <div className="flex gap-1.5">
+        {([1, 2, 3, 4, 5] as EnergyRating[]).map((n) => {
+          const active = value === n;
+          return (
+            <button
+              key={n}
+              onClick={() => onChange(n)}
+              className={`flex-1 flex flex-col items-center gap-1 py-2.5 rounded-xl border transition-all ${
+                active
+                  ? "border-gold/50 bg-gold/12"
+                  : "border-bg-border bg-bg-elevated hover:border-text-muted/30"
+              }`}
+            >
+              <span className="text-base leading-none">{ENERGY_EMOJI[n]}</span>
+              <span className={`text-[9px] uppercase tracking-wide leading-none font-bold ${active ? "text-gold" : "text-text-muted"}`}>
+                {ENERGY_LABELS[n]}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ─── Main form ────────────────────────────────────────────────────────────────
 
 export default function DailyLogForm() {
@@ -193,6 +303,9 @@ export default function DailyLogForm() {
     }
   );
 
+  const [soreness, setSoreness]     = useState<SorenessRating | null>(existingEntry?.soreness ?? null);
+  const [energyLevel, setEnergyLevel] = useState<EnergyRating | null>(existingEntry?.energyLevel ?? null);
+
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
@@ -205,6 +318,8 @@ export default function DailyLogForm() {
       nutrition,
       training,
       recovery,
+      soreness,
+      energyLevel,
       createdAt: existingEntry?.createdAt ?? new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -278,6 +393,24 @@ export default function DailyLogForm() {
             label="Sleep Quality"
             value={sleep.qualityRating}
             onChange={(v) => setSleep({ ...sleep, qualityRating: v })}
+          />
+        </div>
+      </section>
+
+      {/* ── How Do You Feel ── */}
+      <section className="bg-bg-card border border-bg-border rounded-2xl p-5">
+        <SectionHeader icon={<Activity size={16} />} title="How Do You Feel" />
+        <p className="text-xs text-text-muted mb-4 -mt-2 leading-relaxed">
+          These two signals directly drive which recovery protocols you get today.
+        </p>
+        <div className="flex flex-col gap-4">
+          <SorenessPicker
+            value={soreness}
+            onChange={setSoreness}
+          />
+          <EnergyPicker
+            value={energyLevel}
+            onChange={setEnergyLevel}
           />
         </div>
       </section>
@@ -367,26 +500,57 @@ export default function DailyLogForm() {
       {/* ── Recovery ── */}
       <section className="bg-bg-card border border-bg-border rounded-2xl p-5">
         <SectionHeader icon={<Wind size={16} />} title="Recovery Modalities" />
+        <p className="text-xs text-text-muted mb-4 -mt-2 leading-relaxed">
+          Check everything you completed today — this feeds your modalities subscore.
+        </p>
         <div className="flex flex-col gap-3">
           <Toggle
-            label="Ice Bath"
+            label="Ice Bath / Cold Plunge"
+            sublabel="10–15 min · inflammation flush"
             value={recovery.iceBath}
             onChange={(v) => setRecovery({ ...recovery, iceBath: v })}
           />
           <Toggle
             label="Sauna"
+            sublabel="15–20 min · heat-shock protein activation"
             value={recovery.sauna}
             onChange={(v) => setRecovery({ ...recovery, sauna: v })}
           />
           <Toggle
-            label="Compression (Normatec)"
+            label="Contrast Therapy"
+            sublabel="Hot/cold alternating · circulation flush"
+            value={recovery.contrastTherapy ?? false}
+            onChange={(v) => setRecovery({ ...recovery, contrastTherapy: v })}
+          />
+          <Toggle
+            label="Compression Boots (Normatec)"
+            sublabel="25 min · lymphatic and venous return"
             value={recovery.compression}
             onChange={(v) => setRecovery({ ...recovery, compression: v })}
           />
           <Toggle
             label="Massage / Manual Therapy"
+            sublabel="Soft tissue · reduces adhesions"
             value={recovery.massage}
             onChange={(v) => setRecovery({ ...recovery, massage: v })}
+          />
+          <Toggle
+            label="Breathwork"
+            sublabel="Box breathing, HRV biofeedback · nervous system"
+            value={recovery.breathwork ?? false}
+            onChange={(v) => setRecovery({ ...recovery, breathwork: v })}
+          />
+          <Toggle
+            label="Dedicated Stretching / Yoga"
+            sublabel="15+ min flexibility session"
+            value={recovery.stretching ?? false}
+            onChange={(v) => setRecovery({ ...recovery, stretching: v })}
+          />
+          <Toggle
+            label="Legs Up the Wall / Elevation"
+            sublabel="10–20 min · passive venous return"
+            value={recovery.elevationLegs ?? false}
+            onChange={(v) => setRecovery({ ...recovery, elevationLegs: v })}
           />
         </div>
       </section>

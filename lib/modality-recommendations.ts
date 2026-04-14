@@ -6,7 +6,7 @@
  *  2. Recommend EXACTLY 3 modalities (circulation · tissue · nervous system)
  */
 
-import type { TrainingType, IntensityLevel } from "./types";
+import type { TrainingType, IntensityLevel, AthleteArchetype } from "./types";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -42,6 +42,11 @@ export interface UnifiedInput {
    *   ≥ 4 → no override — higher-intensity options remain available
    */
   psych_score?: number | null;
+  /**
+   * Athlete archetype — drives sport-specific recommendation framing.
+   * null = generic framing (no sport context available).
+   */
+  archetype?: AthleteArchetype | null;
 }
 
 export interface ModalityRecommendation {
@@ -179,35 +184,60 @@ export function getRecommendation(modalityName: string): string {
   }
 }
 
+// ─── Sport-specific context phrases ─────────────────────────────────────────
+
+function sportContext(archetype: AthleteArchetype | null | undefined): {
+  legs: string;
+  nextSession: string;
+  performanceWord: string;
+} {
+  switch (archetype) {
+    case "team_sport":
+      return { legs: "your legs", nextSession: "next match", performanceWord: "on the pitch" };
+    case "endurance":
+      return { legs: "your legs", nextSession: "next long session", performanceWord: "on the road" };
+    case "strength":
+      return { legs: "your muscles", nextSession: "next lifting session", performanceWord: "under the bar" };
+    case "hybrid":
+      return { legs: "your body", nextSession: "next training block", performanceWord: "in the gym" };
+    case "weekend_warrior":
+      return { legs: "your body", nextSession: "next activity", performanceWord: "out there" };
+    default:
+      return { legs: "your legs", nextSession: "tomorrow's session", performanceWord: "at your next session" };
+  }
+}
+
 // ─── Category selectors ──────────────────────────────────────────────────────
 
 function pickCirculation(input: UnifiedInput, score: number): ModalityRecommendation {
-  const { today_training: t, soreness } = input;
+  const { today_training: t, soreness, archetype } = input;
+  const ctx = sportContext(archetype);
 
   // High load or game → prioritise circulation recovery (takes priority over psych signal)
   if (t.type === "game" || (t.intensity === "high" && score < 70)) {
     return pick("compression_boots",
-      "25 minutes in compression boots right now pushes recovery fluid through your legs — you'll start tomorrow significantly fresher and reduce soreness before it sets in.");
+      `25 minutes in compression boots right now pushes recovery fluid through ${ctx.legs} — you'll start tomorrow significantly fresher and reduce soreness before it sets in.`);
   }
   if (soreness === "high") {
     return pick("ice_bath",
-      "10 minutes of cold water right now flushes the inflammation out of your legs — you'll recover a full day faster and get back to full training capacity sooner.");
+      `10 minutes of cold water right now flushes the inflammation out of ${ctx.legs} — you'll recover a full day faster and get back to full capacity for ${ctx.nextSession}.`);
   }
   // Low psych readiness → steer toward passive, low-demand active recovery
   if (input.psych_score != null && input.psych_score <= 2) {
     return pick("active_recovery",
-      "20 minutes of easy movement clears fatigue without adding stress — your body and mind both reset faster with light activity than complete rest.");
+      `20 minutes of easy movement clears fatigue without adding stress — your body and mind both reset faster with light activity than complete rest. You'll show up more ready ${ctx.performanceWord}.`);
   }
   if (score >= 75) {
     return pick("active_recovery",
-      "20 minutes of light movement keeps blood flowing without adding training load — your legs will feel ready and responsive for tomorrow's full session.");
+      `20 minutes of light movement keeps blood flowing without adding training load — ${ctx.legs} will feel ready and responsive for ${ctx.nextSession}.`);
   }
   return pick("compression_boots",
-    "25 minutes in compression boots pumps recovery fluid through your legs — you'll wake up tomorrow with noticeably less soreness and more spring in your step.");
+    `25 minutes in compression boots pumps recovery fluid through ${ctx.legs} — you'll wake up tomorrow with noticeably less soreness and more spring in your step.`);
 }
 
 function pickTissueWork(input: UnifiedInput, used: Set<string>): ModalityRecommendation {
-  const { soreness, injury } = input;
+  const { soreness, injury, archetype } = input;
+  const ctx = sportContext(archetype);
 
   // Rule: myofascial only when soreness or injury present
   if ((soreness !== "low" || injury.active) && !used.has("myofascial_release")) {
@@ -215,20 +245,27 @@ function pickTissueWork(input: UnifiedInput, used: Set<string>): ModalityRecomme
       ? ` Give extra time to the ${injury.area} — consistent work here is what prevents this from becoming a longer-term setback.`
       : "";
     return pick("myofascial_release",
-      `12 minutes rolling out the tight spots breaks up tissue adhesions — you'll have more range of motion and less pain in your very next session.${area}`);
+      `12 minutes rolling out the tight spots breaks up tissue adhesions — you'll have more range of motion and less pain ${ctx.performanceWord}.${area}`);
   }
-  return pick("foam_rolling",
-    "12 minutes of foam rolling restores tissue length and reduces next-day stiffness — your first reps tomorrow will feel significantly smoother and more controlled.");
+
+  // Sport-specific foam rolling framing
+  const rollingReason =
+    archetype === "team_sport"   ? "12 minutes of foam rolling restores tissue length in your hips and quads — you'll move faster and change direction more fluidly at your next session." :
+    archetype === "endurance"    ? "12 minutes of foam rolling unlocks your calves, hamstrings, and IT band — your stride mechanics improve and injury risk drops with every session you do this." :
+    archetype === "strength"     ? "12 minutes of foam rolling restores tissue density and reduces next-day stiffness — your first working sets tomorrow will feel significantly more controlled." :
+    "12 minutes of foam rolling restores tissue length and reduces next-day stiffness — your first reps tomorrow will feel significantly smoother and more controlled.";
+
+  return pick("foam_rolling", rollingReason);
 }
 
 function pickNervousSystem(input: UnifiedInput, score: number, used: Set<string>): ModalityRecommendation {
-  const { physiology: { sleep_hours, hrv_trend } } = input;
+  const { physiology: { sleep_hours, hrv_trend }, archetype } = input;
 
   // Low recovery → prioritise sleep (takes priority over psych signal)
   if (score < 45 || sleep_hours < 6) {
     return pick("sleep_protocol",
       sleep_hours < 6
-        ? `You logged ${sleep_hours.toFixed(1)}h last night — 8 hours tonight is worth more to your score than any supplement or protocol. Set a bedtime now and stay off screens 60 minutes before.`
+        ? `You logged ${sleep_hours.toFixed(1)}h last night — 8 hours tonight is worth more to your performance than any protocol or supplement. Set a bedtime now and stay off screens 60 minutes before.`
         : "Your score needs maximum repair time tonight — go to bed two hours earlier and keep your room below 68°F. You'll gain 10+ recovery points by tomorrow morning.");
   }
   // Low psych readiness → nervous system calming before HRV or score threshold
@@ -242,8 +279,15 @@ function pickNervousSystem(input: UnifiedInput, score: number, used: Set<string>
     return pick("breathwork",
       "10 minutes of controlled breathing lowers your heart rate and cortisol right now — you'll fall asleep faster tonight and wake up measurably more recovered tomorrow.");
   }
-  return pick("breathwork",
-    "10 minutes of box breathing before sleep shifts your nervous system into full recovery mode — you'll get more repair done in the same hours of sleep and wake up with a higher score.");
+
+  // Sport-specific breathwork framing
+  const breathworkReason =
+    archetype === "team_sport"   ? "10 minutes of box breathing before sleep sharpens mental readiness and lowers resting HR — you'll feel more composed and decisive in your next match." :
+    archetype === "endurance"    ? "10 minutes of diaphragmatic breathing improves oxygen efficiency and drops cortisol — your aerobic base recovers faster and you'll pace better in tomorrow's session." :
+    archetype === "strength"     ? "10 minutes of breathing work resets your nervous system post-lifting — you'll sleep deeper and wake up with less residual tension in your prime movers." :
+    "10 minutes of box breathing before sleep shifts your nervous system into full recovery mode — you'll get more repair done in the same hours of sleep and wake up with a higher score.";
+
+  return pick("breathwork", breathworkReason);
 }
 
 // ─── Summary builder ─────────────────────────────────────────────────────────
@@ -296,7 +340,8 @@ export function unifiedRecoveryEngine(input: UnifiedInput): UnifiedOutput {
 
 // ─── Derive input from app state ─────────────────────────────────────────────
 
-import type { DailyEntry, ScoreBreakdown, BloodworkPanel, TrainingDay } from "./types";
+import type { DailyEntry, ScoreBreakdown, BloodworkPanel, TrainingDay, PerformanceProfile } from "./types";
+import { GOAL_ARCHETYPE } from "./types";
 
 const OFF_TRAINING: TrainingContext = { type: "off", duration: 0, intensity: "low" };
 
@@ -305,28 +350,56 @@ function trainingDayToContext(day: TrainingDay | undefined): TrainingContext {
   return { type: day.training_type, duration: day.duration, intensity: day.intensity };
 }
 
+/**
+ * Convert a 1–5 soreness rating from the daily log into a SorenessLevel.
+ *   1–2 → low       (none / mild)
+ *   3   → moderate  (noticeable)
+ *   4–5 → high      (significant / severe)
+ */
+function ratingToSoreness(rating: number): SorenessLevel {
+  if (rating >= 4) return "high";
+  if (rating >= 3) return "moderate";
+  return "low";
+}
+
 export function buildUnifiedInput(
-  baseScore:         number,
-  breakdown:         ScoreBreakdown,
-  entry:             DailyEntry,
-  todayPlan?:        TrainingDay | null,
-  tomorrowPlan?:     TrainingDay | null,
-  bwPanel?:          BloodworkPanel | null,
+  baseScore:          number,
+  breakdown:          ScoreBreakdown,
+  entry:              DailyEntry,
+  todayPlan?:         TrainingDay | null,
+  tomorrowPlan?:      TrainingDay | null,
+  bwPanel?:           BloodworkPanel | null,
   bloodworkModifier?: number,
-  moodRating?:       number | null,
+  moodRating?:        number | null,
+  performanceProfile?: PerformanceProfile | null,
 ): UnifiedInput {
   const hrv_trend: HRVTrend =
     breakdown.hrv >= 70 ? "up" :
     breakdown.hrv < 45  ? "down" : "flat";
 
-  // Soreness: derived from CK biomarker only.
+  // Soreness: prefer direct user input (daily log 1–5 scale) — most accurate signal.
+  // Fall back to CK biomarker if available, then default to "low".
   // Do NOT infer from training intensity — the intensity is already captured by the
-  // readiness load-modifier (−5/−10/−20). Adding soreness on top would double-count
-  // the same signal and unfairly penalise high-intensity or game days.
-  const ck = bwPanel?.creatineKinase ?? null;
-  const soreness: SorenessLevel =
-    ck != null && ck > 300 ? "high" :
-    ck != null && ck > 200 ? "moderate" : "low";
+  // readiness load-modifier (−5/−10/−20). Adding soreness on top would double-count.
+  let soreness: SorenessLevel = "low";
+  if (entry.soreness != null) {
+    soreness = ratingToSoreness(entry.soreness);
+  } else {
+    const ck = bwPanel?.creatineKinase ?? null;
+    soreness =
+      ck != null && ck > 300 ? "high" :
+      ck != null && ck > 200 ? "moderate" : "low";
+  }
+
+  // Energy level → psych_score bridge: if mood isn't logged but energy is, use that
+  const effectivePsych =
+    moodRating != null ? moodRating :
+    entry.energyLevel  != null ? entry.energyLevel : null;
+
+  // Resolve archetype from performance profile
+  const archetype = performanceProfile?.primaryGoal
+    ? GOAL_ARCHETYPE[performanceProfile.primaryGoal]
+    : null;
 
   return {
     recovery_score_base:  baseScore,
@@ -339,6 +412,7 @@ export function buildUnifiedInput(
     soreness,
     injury: { active: false, area: null },
     bloodwork_modifier: bloodworkModifier ?? 0,
-    psych_score: moodRating ?? null,
+    psych_score: effectivePsych,
+    archetype,
   };
 }

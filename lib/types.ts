@@ -37,7 +37,31 @@ export interface RecoveryModalities {
   sauna: boolean;
   compression: boolean;           // Normatec etc.
   massage: boolean;
+  contrastTherapy?: boolean;      // hot/cold alternating
+  breathwork?: boolean;           // box breathing, HRV biofeedback
+  stretching?: boolean;           // dedicated flexibility session
+  elevationLegs?: boolean;        // passive legs-up-the-wall
 }
+
+/**
+ * Perceived soreness scale (1–5):
+ *   1 = None      — no muscle soreness
+ *   2 = Mild      — slight stiffness, not limiting
+ *   3 = Moderate  — noticeable soreness, some movement restriction
+ *   4 = Significant — clear soreness, affects daily movement
+ *   5 = Severe    — painful soreness, significantly limits movement
+ */
+export type SorenessRating = 1 | 2 | 3 | 4 | 5;
+
+/**
+ * Perceived energy scale (1–5):
+ *   1 = Depleted  — barely getting through the day
+ *   2 = Low       — noticeably fatigued
+ *   3 = Moderate  — functional but not energized
+ *   4 = Good      — energized and alert
+ *   5 = Excellent — feeling sharp and powerful
+ */
+export type EnergyRating = 1 | 2 | 3 | 4 | 5;
 
 export interface DailyEntry {
   id: string;
@@ -46,6 +70,12 @@ export interface DailyEntry {
   nutrition: NutritionData;
   training: TrainingData;
   recovery: RecoveryModalities;
+  /** Perceived muscle soreness today (1–5). Null if not logged. */
+  soreness?: SorenessRating | null;
+  /** Perceived energy level today (1–5). Null if not logged. */
+  energyLevel?: EnergyRating | null;
+  /** Free-text notes for the day (injury info, unusual events, etc.) */
+  notes?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -384,17 +414,73 @@ export interface DailyTaskCompletion {
 // ─── Performance Profile ─────────────────────────────────────────────────────
 
 export const PERFORMANCE_GOALS = [
+  // Team sports
+  "Soccer",
+  "Basketball",
+  "Football",
+  "Baseball / Softball",
+  "Volleyball",
+  "Hockey",
+  "Rugby / Lacrosse",
+  // Endurance
   "Marathon",
   "Half Marathon",
+  "Trail Running",
   "Triathlon",
   "Ironman",
   "Cycling Race",
+  "Swimming",
+  "Rowing",
+  // Strength / Combat
   "Strength Training",
   "Powerlifting",
   "MMA / Combat Sports",
+  "CrossFit",
+  "Rock Climbing",
+  // Lifestyle
   "General Fitness",
+  "Weekend Warrior",
   "Longevity",
 ] as const;
+
+/**
+ * Broad athlete archetype — drives nutrition norms, coaching tone,
+ * and sport-specific recommendation framing.
+ */
+export type AthleteArchetype =
+  | "team_sport"      // soccer, basketball, football, etc.
+  | "endurance"       // marathon, triathlon, ironman, cycling, swimming
+  | "strength"        // powerlifting, strength training
+  | "hybrid"          // crossfit, MMA, rugby
+  | "weekend_warrior" // recreational, no structured plan
+  | "longevity";      // health-focused, low intensity
+
+/** Map each goal to its archetype for downstream logic */
+export const GOAL_ARCHETYPE: Record<PerformanceGoal, AthleteArchetype> = {
+  "Soccer":             "team_sport",
+  "Basketball":         "team_sport",
+  "Football":           "team_sport",
+  "Baseball / Softball":"team_sport",
+  "Volleyball":         "team_sport",
+  "Hockey":             "team_sport",
+  "Rugby / Lacrosse":   "hybrid",
+  "Marathon":           "endurance",
+  "Half Marathon":      "endurance",
+  "Trail Running":      "endurance",
+  "Triathlon":          "endurance",
+  "Ironman":            "endurance",
+  "Cycling Race":       "endurance",
+  "Swimming":           "endurance",
+  "Rowing":             "endurance",
+  "Strength Training":  "strength",
+  "Powerlifting":       "strength",
+  "MMA / Combat Sports":"hybrid",
+  "CrossFit":           "hybrid",
+  "Rock Climbing":      "hybrid",
+  "General Fitness":    "weekend_warrior",
+  "Weekend Warrior":    "weekend_warrior",
+  "Longevity":          "longevity",
+};
 
 export type PerformanceGoal = (typeof PERFORMANCE_GOALS)[number];
 
@@ -403,9 +489,15 @@ export type PerformancePriority = "Performance" | "Recovery" | "Longevity";
 
 export interface PerformanceProfile {
   primaryGoal:    PerformanceGoal;
-  eventDate?:     string | null;          // YYYY-MM-DD
+  eventDate?:     string | null;          // YYYY-MM-DD — race day, season opener, next game, etc.
   trainingFocus?: TrainingFocus | null;
   priority?:      PerformancePriority | null;
+  /** Optional: sport position or discipline detail, e.g. "Midfielder", "Goalkeeper", "Open Water" */
+  position?:      string | null;
+  /** Approximate weekly training hours — used to calibrate nutrition norms */
+  weeklyHours?:   number | null;          // e.g. 8 for a competitive triathlete
+  /** Body weight in lbs — used for protein/hydration targets */
+  bodyWeightLbs?: number | null;
 }
 
 // ─── Store shape ─────────────────────────────────────────────────────────────

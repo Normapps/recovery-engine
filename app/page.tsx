@@ -811,16 +811,17 @@ function TodaysPlanCard({
 // ─── Main Dashboard ───────────────────────────────────────────────────────
 
 export default function Dashboard() {
-  const todayScore      = useStore((s) => s.todayScore);
-  const todayEntry      = useStore((s) => s.todayEntry);
-  const coachingPrefs   = useStore((s) => s.coachingPrefs);
-  const upsertEntry     = useStore((s) => s.upsertEntry);
-  const upsertScore     = useStore((s) => s.upsertScore);
-  const scores          = useStore((s) => s.scores);
-  const trainingPlan    = useStore((s) => s.trainingPlan);
-  const moodLog         = useStore((s) => s.moodLog);
-  const setMood         = useStore((s) => s.setMood);
-  const latestBloodwork = useLatestBloodwork(90);
+  const todayScore        = useStore((s) => s.todayScore);
+  const todayEntry        = useStore((s) => s.todayEntry);
+  const coachingPrefs     = useStore((s) => s.coachingPrefs);
+  const upsertEntry       = useStore((s) => s.upsertEntry);
+  const upsertScore       = useStore((s) => s.upsertScore);
+  const scores            = useStore((s) => s.scores);
+  const trainingPlan      = useStore((s) => s.trainingPlan);
+  const moodLog           = useStore((s) => s.moodLog);
+  const setMood           = useStore((s) => s.setMood);
+  const latestBloodwork   = useLatestBloodwork(90);
+  const performanceProfile = useStore((s) => s.performanceProfile);
 
   useEffect(() => {
     if (Object.keys(scores).length === 0) {
@@ -846,6 +847,7 @@ export default function Dashboard() {
     latestBloodwork={latestBloodwork}
     trainingPlan={trainingPlan}
     todayMood={moodLog[todayKey] ?? null}
+    performanceProfile={performanceProfile}
     onMoodChange={(v) => {
       setMood(todayKey, v);
       upsertDailyCheckin(todayKey, v); // fire-and-forget; no-ops when Supabase not configured
@@ -861,16 +863,18 @@ function DashboardContent({
   latestBloodwork,
   trainingPlan,
   todayMood,
+  performanceProfile,
   onMoodChange,
 }: {
-  todayScore:    RecoveryScore;
-  todayEntry:    DailyEntry;
-  coachMode:     "hardcore" | "balanced" | "recovery";
-  today:         string;
-  latestBloodwork: ReturnType<typeof useLatestBloodwork>;
-  trainingPlan:  TrainingPlan | null;
-  todayMood:     number | null;
-  onMoodChange:  (v: number) => void;
+  todayScore:          RecoveryScore;
+  todayEntry:          DailyEntry;
+  coachMode:           "hardcore" | "balanced" | "recovery";
+  today:               string;
+  latestBloodwork:     ReturnType<typeof useLatestBloodwork>;
+  trainingPlan:        TrainingPlan | null;
+  todayMood:           number | null;
+  performanceProfile:  import("@/lib/types").PerformanceProfile | null;
+  onMoodChange:        (v: number) => void;
 }) {
   const { breakdown, confidence } = todayScore;
   const dateKey = todayScore.date; // YYYY-MM-DD
@@ -915,6 +919,7 @@ function DashboardContent({
     latestBloodwork?.panel ?? null,
     0,
     todayMood,
+    performanceProfile,
   );
   const unified = unifiedRecoveryEngine(unifiedInput);
 
@@ -1002,7 +1007,14 @@ function DashboardContent({
     todayEntry.sleep.hrv        ? `${todayEntry.sleep.hrv} HRV` : null,
     todayEntry.sleep.restingHR  ? `${todayEntry.sleep.restingHR} RHR` : null,
     todayEntry.sleep.qualityRating ? `Quality ${todayEntry.sleep.qualityRating}/5` : null,
+    todayEntry.energyLevel != null ? `Energy ${todayEntry.energyLevel}/5` : null,
   ].filter(Boolean) as string[];
+
+  // ── Feel context (soreness + energy) ─────────────────────────────────────
+  const SORENESS_LABEL: Record<number, string> = { 1:"None", 2:"Mild", 3:"Moderate", 4:"Significant", 5:"Severe" };
+  const ENERGY_LABEL:   Record<number, string> = { 1:"Depleted", 2:"Low", 3:"Moderate", 4:"Good", 5:"Excellent" };
+  const sorenessText  = todayEntry.soreness    != null ? `${SORENESS_LABEL[todayEntry.soreness]} soreness`   : null;
+  const energyText    = todayEntry.energyLevel != null ? `${ENERGY_LABEL[todayEntry.energyLevel]} energy`    : null;
 
   // ── Readiness breakdown details ───────────────────────────────────────
   // ── Readiness breakdown — built directly from the scorer's own deltas ────
@@ -1070,8 +1082,14 @@ function DashboardContent({
       {/* ── Header ──────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold text-text-primary">Recovery Engine</h1>
-          <p className="text-xs text-text-muted mt-0.5 uppercase tracking-wider">{today}</p>
+          <h1 className="text-xl font-bold text-text-primary">
+            {performanceProfile?.primaryGoal ?? "Recovery Engine"}
+          </h1>
+          <p className="text-xs text-text-muted mt-0.5 uppercase tracking-wider">
+            {performanceProfile?.position
+              ? `${performanceProfile.position} · ${today}`
+              : today}
+          </p>
         </div>
         <Link
           href="/log"
@@ -1081,6 +1099,38 @@ function DashboardContent({
           Update
         </Link>
       </div>
+
+      {/* ── Race / Event Countdown ──────────────────────────────────────── */}
+      {performanceProfile?.eventDate && (() => {
+        const daysUntil = Math.ceil(
+          (new Date(performanceProfile.eventDate + "T12:00:00").getTime() - Date.now()) / 86400000
+        );
+        if (daysUntil < 0) return null; // event passed
+        const isImminient = daysUntil <= 7;
+        const isTaper     = daysUntil <= 21 && daysUntil > 7;
+        const urgencyColor = isImminient ? "#EF4444" : isTaper ? "#F59E0B" : "#F59E0B";
+        return (
+          <div
+            className="rounded-2xl border px-4 py-3 flex items-center justify-between"
+            style={{ borderColor: `${urgencyColor}30`, backgroundColor: `${urgencyColor}08` }}
+          >
+            <div>
+              <p className="text-xs font-bold uppercase tracking-widest" style={{ color: urgencyColor }}>
+                {isImminient ? "🏁 Race Week" : isTaper ? "📉 Taper Period" : "🎯 Next Event"}
+              </p>
+              <p className="text-xs text-text-muted mt-0.5">
+                {format(new Date(performanceProfile.eventDate + "T12:00:00"), "MMMM d, yyyy")}
+              </p>
+            </div>
+            <div className="text-right">
+              <span className="text-2xl font-extrabold tabular-nums" style={{ color: urgencyColor }}>
+                {daysUntil}
+              </span>
+              <p className="text-xs text-text-muted">days out</p>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── Score rings ─────────────────────────────────────────────────── */}
       <div className="flex flex-col sm:flex-row items-center justify-center gap-6">
@@ -1164,6 +1214,35 @@ function DashboardContent({
 
       {/* ── Mood ─────────────────────────────────────────────────────────── */}
       <MoodPicker value={todayMood} onChange={onMoodChange} />
+
+      {/* ── Soreness + Energy context pills ─────────────────────────────── */}
+      {(sorenessText || energyText) && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs text-text-muted">Today:</span>
+          {sorenessText && (
+            <span className={`text-xs font-semibold px-2.5 py-1 rounded-full border ${
+              todayEntry.soreness! >= 4
+                ? "border-red-500/30 bg-red-500/10 text-red-400"
+                : todayEntry.soreness! >= 3
+                ? "border-amber-500/30 bg-amber-500/10 text-amber-400"
+                : "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+            }`}>
+              {sorenessText}
+            </span>
+          )}
+          {energyText && (
+            <span className={`text-xs font-semibold px-2.5 py-1 rounded-full border ${
+              todayEntry.energyLevel! <= 2
+                ? "border-red-500/30 bg-red-500/10 text-red-400"
+                : todayEntry.energyLevel! <= 3
+                ? "border-amber-500/30 bg-amber-500/10 text-amber-400"
+                : "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+            }`}>
+              {energyText}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* ── Training impact ──────────────────────────────────────────────── */}
       {trainingPlan && (

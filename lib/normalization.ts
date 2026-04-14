@@ -182,16 +182,58 @@ export function normHydration(oz: number): number {
 
 /**
  * Normalize daily caloric intake (kcal) → 0–100.
- * Severe undereating and gross overeating both penalize recovery.
+ * Severe undereating penalizes recovery; adequate fueling across a wide range
+ * scores well. The upper band is intentionally wide to accommodate endurance
+ * athletes (Ironman, marathon, cycling) who legitimately eat 4,000–6,000 kcal
+ * on high-volume training days.
  */
 export function normCalories(kcal: number): number {
-  // Non-monotonic: optimal band 1800–3500, penalties on both sides
-  if (kcal < 1200)                         return finalize(lerp(kcal, 0, 1200, 0, 30));
-  if (kcal >= 1200 && kcal < 1500)        return finalize(lerp(kcal, 1200, 1500, 30, 50));
-  if (kcal >= 1500 && kcal < 1800)        return finalize(lerp(kcal, 1500, 1800, 50, 65));
-  if (kcal >= 1800 && kcal <= 3500)       return 85;   // flat optimal band
-  if (kcal > 3500  && kcal <= 4500)       return finalize(lerp(kcal, 3500, 4500, 85, 65));
-  return finalize(lerp(kcal, 4500, 6000, 65, 40));     // surplus excess
+  // Non-monotonic: optimal band 1,800–5,500, severe underfueling penalizes hard
+  if (kcal < 1200)                        return finalize(lerp(kcal, 0, 1200, 0, 25));
+  if (kcal >= 1200 && kcal < 1500)       return finalize(lerp(kcal, 1200, 1500, 25, 45));
+  if (kcal >= 1500 && kcal < 1800)       return finalize(lerp(kcal, 1500, 1800, 45, 65));
+  if (kcal >= 1800 && kcal <= 5500)      return 88;   // wide optimal band for all athlete types
+  if (kcal > 5500  && kcal <= 7000)      return finalize(lerp(kcal, 5500, 7000, 88, 65));
+  return finalize(lerp(kcal, 7000, 9000, 65, 40));    // extreme surplus
+}
+
+/**
+ * Sport-archetype-aware calorie norm.
+ * Returns the minimum kcal threshold for a "good" score given weekly training hours.
+ * Use this to contextualise the normCalories output for athletes with high volume.
+ */
+export function calorieTargetByVolume(weeklyHours: number, bodyWeightLbs: number): number {
+  // Base metabolic rate estimate: 13 × bodyweight lbs
+  const bmr = 13 * bodyWeightLbs;
+  // Activity multiplier: scales from sedentary (1.2×) to very high volume (1.9×)
+  const multiplier = weeklyHours <= 3  ? 1.3 :
+                     weeklyHours <= 6  ? 1.5 :
+                     weeklyHours <= 10 ? 1.65:
+                     weeklyHours <= 15 ? 1.75: 1.9;
+  return Math.round(bmr * multiplier);
+}
+
+/**
+ * Normalize protein intake (grams) with body-weight context.
+ * Endurance athletes: ~0.7–0.9g/lb  (high oxidative stress, moderate anabolism)
+ * Strength athletes: ~0.9–1.1g/lb   (high mechanical damage, max anabolism)
+ * Weekend warrior: ~0.5–0.7g/lb     (general health)
+ * Falls back to the fixed normProtein curve when bodyWeightLbs is not provided.
+ */
+export function normProteinContextual(grams: number, bodyWeightLbs: number | null): number {
+  if (!bodyWeightLbs) return normProtein(grams);
+  // Optimal target: 0.85g/lb (blended athlete standard)
+  const optimal = bodyWeightLbs * 0.85;
+  return finalize(
+    piecewise(grams, [
+      [0,              10],
+      [optimal * 0.3,  25],
+      [optimal * 0.55, 50],
+      [optimal * 0.75, 72],
+      [optimal,        100],
+      [optimal * 1.4,  100], // no penalty for moderate surplus
+    ] as const),
+  );
 }
 
 // ─── Training load ────────────────────────────────────────────────────────────
