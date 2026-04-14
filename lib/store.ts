@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { AppState, DailyEntry, RecoveryScore, BloodworkEntry, CoachingPreferences, TrainingPlan, PerformanceProfile } from "./types";
+import type { AppState, DailyEntry, RecoveryScore, BloodworkEntry, CoachingPreferences, TrainingPlan, PerformanceProfile, DailyTaskCompletion, PlanTaskItem } from "./types";
 import { format } from "date-fns";
 import { computeRecoveryScore } from "./recovery-engine";
 
@@ -18,6 +18,8 @@ export const useStore = create<AppState>()(
       bloodwork: [],
       trainingPlan: null,
       moodLog: {},
+      taskLog: {},
+      planTaskLog: {},
       performanceProfile: null,
       coachingPrefs: { mode: "balanced" },
 
@@ -60,6 +62,40 @@ export const useStore = create<AppState>()(
       setTrainingPlan: (plan) => set({ trainingPlan: plan }),
       setMood: (date, rating) =>
         set((state) => ({ moodLog: { ...state.moodLog, [date]: rating } })),
+
+      toggleTask: (date, task) =>
+        set((state) => {
+          const existing: DailyTaskCompletion = state.taskLog[date] ?? {
+            date,
+            training_completed:  false,
+            recovery_completed:  false,
+            nutrition_completed: false,
+            rehab_completed:     false,
+          };
+          const updated: DailyTaskCompletion = {
+            ...existing,
+            [task]: !existing[task],
+          };
+          return { taskLog: { ...state.taskLog, [date]: updated } };
+        }),
+
+      setPlanTaskLog: (date, tasks) =>
+        set((state) => ({ planTaskLog: { ...state.planTaskLog, [date]: tasks } })),
+
+      togglePlanTask: (date, taskId) =>
+        set((state) => {
+          const tasks = state.planTaskLog[date];
+          if (!tasks) return state;
+          return {
+            planTaskLog: {
+              ...state.planTaskLog,
+              [date]: tasks.map((t: PlanTaskItem) =>
+                t.id === taskId ? { ...t, completed: !t.completed } : t
+              ),
+            },
+          };
+        }),
+
       setPerformanceProfile: (profile: PerformanceProfile | null) =>
         set({ performanceProfile: profile }),
       setCoachingPrefs: (prefs) => set({ coachingPrefs: prefs }),
@@ -78,12 +114,16 @@ export const useStore = create<AppState>()(
     }),
     {
       name: "recovery-engine-store",
-      version: 2,
+      version: 3,
       migrate: (persistedState: unknown, version: number) => {
         const state = persistedState as Record<string, unknown>;
         if (version < 2) {
           // BloodworkEntry structure changed in v2 — clear legacy data
-          return { ...state, bloodwork: [] };
+          return { ...state, bloodwork: [], planTaskLog: {} };
+        }
+        if (version < 3) {
+          // planTaskLog added in v3 — initialise to empty
+          return { ...state, planTaskLog: {} };
         }
         return state;
       },

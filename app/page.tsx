@@ -19,8 +19,8 @@ import {
   buildUnifiedInput,
   type ModalityRecommendation,
 } from "@/lib/modality-recommendations";
-import { upsertDailyCheckin, upsertTaskCompletion } from "@/lib/supabase";
-import { type DailyTaskCompletion, TASK_XP } from "@/lib/types";
+import { upsertDailyCheckin, upsertTaskCompletion, upsertPlanTasks } from "@/lib/supabase";
+import { type DailyTaskCompletion, TASK_XP, type PlanTaskItem, type PlanCategory } from "@/lib/types";
 import { generateDailyPlan, type DailyPlan } from "@/lib/daily-plan";
 import { generatePlanDetails, type PlanSection, type NutritionSection, type PlanDetails } from "@/lib/plan-details";
 import {
@@ -656,6 +656,60 @@ function CompletedTasksCard({
   );
 }
 
+// ─── Plan task helpers ───────────────────────────────────────────────────────
+
+/**
+ * Synthesises 3 concise, checkable action items from the structured nutrition
+ * section (which has no `instructions` array unlike the other PlanSections).
+ */
+function getNutritionTaskTexts(n: NutritionSection): string[] {
+  return [
+    `Hit ${n.protein.totalGrams}g protein (${n.protein.perMeal}g per meal)`,
+    `Hydrate to ${n.hydration.totalOz}oz today`,
+    n.micronutrients
+      ? `Focus on ${n.micronutrients.focus.slice(0, 2).join(" and ")}`
+      : "Time carbs around your training window",
+  ];
+}
+
+/**
+ * Builds a fresh PlanTaskItem[] from planDetails for the given date.
+ * All items start as incomplete — callers should merge against stored state
+ * to preserve completion.
+ */
+function buildPlanTasks(
+  date:           string,
+  details:        PlanDetails,
+  nutritionTexts: string[],
+  injuryActive =  false,
+): PlanTaskItem[] {
+  const cats: Array<{ key: PlanCategory; instructions: string[] }> = [
+    { key: "training",  instructions: details.training.instructions },
+    { key: "recovery",  instructions: details.recovery.instructions },
+    { key: "mobility",  instructions: details.mobility.instructions },
+    { key: "nutrition", instructions: nutritionTexts },
+  ];
+
+  if (injuryActive) {
+    cats.push({
+      key: "rehab",
+      instructions: [
+        "Complete prescribed rehabilitation exercises",
+        "Apply ice or compression to the injured area for 15 minutes",
+        "Check in with your physiotherapist if pain increases",
+      ],
+    });
+  }
+
+  const items: PlanTaskItem[] = [];
+  for (const { key, instructions } of cats) {
+    instructions.forEach((text, i) => {
+      items.push({ id: `${date}-${key}-${i}`, text, category: key, completed: false });
+    });
+  }
+  return items;
+}
+
 // ─── Today's Plan card ───────────────────────────────────────────────────
 
 const PLAN_SECTIONS: Array<{
@@ -669,7 +723,17 @@ const PLAN_SECTIONS: Array<{
   { key: "nutrition", label: "Nutrition", icon: <Utensils   size={12} /> },
 ];
 
-function TodaysPlanCard({ plan, details }: { plan: DailyPlan; details: PlanDetails }) {
+function TodaysPlanCard({
+  plan,
+  details,
+  tasks,
+  onToggle,
+}: {
+  plan:     DailyPlan;
+  details:  PlanDetails;
+  tasks:    PlanTaskItem[];
+  onToggle: (taskId: string) => void;
+}) {
   const [openKey, setOpenKey] = useState<keyof DailyPlan | null>(null);
   const nonNutritionSection = openKey && openKey !== "nutrition"
     ? details[openKey] as PlanSection
@@ -682,28 +746,72 @@ function TodaysPlanCard({ plan, details }: { plan: DailyPlan; details: PlanDetai
         <p className="text-xs font-bold text-text-muted uppercase tracking-widest">
           Today's Plan
         </p>
-        {PLAN_SECTIONS.map(({ key, label, icon }, i) => (
-          <div key={key}>
-            {i > 0 && <div className="h-px bg-bg-border mb-3" />}
-            <button
-              className="w-full text-left group"
-              onClick={() => setOpenKey(key)}
-            >
-              <div className="flex items-center justify-between gap-2 mb-1.5">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-text-muted">{icon}</span>
-                  <span className="text-xs font-semibold text-text-secondary uppercase tracking-wider">
-                    {label}
-                  </span>
+        {PLAN_SECTIONS.map(({ key, label, icon }, i) => {
+          const sectionTasks = tasks.filter((t) => t.category === key);
+          const allDone = sectionTasks.length > 0 && sectionTasks.every((t) => t.completed);
+          return (
+            <div key={key}>
+              {i > 0 && <div className="h-px bg-bg-border mb-3" />}
+
+              {/* Section header — tapping opens the detail modal */}
+              <button
+                className="w-full text-left group mb-2"
+                onClick={() => setOpenKey(key)}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5">
+                    <span className={`transition-colors ${allDone ? "text-emerald-400/60" : "text-text-muted"}`}>
+                      {icon}
+                    </span>
+                    <span className={`text-xs font-semibold uppercase tracking-wider transition-colors ${
+                      allDone ? "text-emerald-400/70" : "text-text-secondary"
+                    }`}>
+                      {label}
+                    </span>
+                    {allDone && (
+                      <Check size={10} strokeWidth={3} className="text-emerald-400/70" />
+                    )}
+                  </div>
+                  <ChevronRight size={12} className="text-text-muted shrink-0 group-hover:text-text-secondary transition-colors" />
                 </div>
-                <ChevronRight size={12} className="text-text-muted shrink-0 group-hover:text-text-secondary transition-colors" />
+              </button>
+
+              {/* Per-instruction checklist */}
+              <div className="flex flex-col gap-1 pl-[19px]">
+                {sectionTasks.length > 0
+                  ? sectionTasks.map((task) => (
+                      <button
+                        key={task.id}
+                        onClick={() => onToggle(task.id)}
+                        className="w-full text-left flex items-start gap-2.5 py-0.5 group/task"
+                      >
+                        {/* Circular checkbox */}
+                        <div className={`mt-0.5 w-3.5 h-3.5 rounded-full border flex items-center justify-center shrink-0 transition-all duration-200 ${
+                          task.completed
+                            ? "border-emerald-500/50 bg-emerald-500/20"
+                            : "border-white/20 group-hover/task:border-white/35"
+                        }`}>
+                          {task.completed && (
+                            <Check size={8} strokeWidth={3} className="text-emerald-400" />
+                          )}
+                        </div>
+                        {/* Task text */}
+                        <span className={`text-xs leading-relaxed transition-all duration-200 ${
+                          task.completed
+                            ? "text-text-muted opacity-40 line-through decoration-text-muted/30"
+                            : "text-text-primary"
+                        }`}>
+                          {task.text}
+                        </span>
+                      </button>
+                    ))
+                  : /* Fallback while tasks load */
+                    <p className="text-xs text-text-primary leading-relaxed">{plan[key]}</p>
+                }
               </div>
-              <p className="text-xs text-text-primary leading-relaxed pl-[19px]">
-                {plan[key]}
-              </p>
-            </button>
-          </div>
-        ))}
+            </div>
+          );
+        })}
       </div>
       <PlanDetailModal section={nonNutritionSection} onClose={() => setOpenKey(null)} />
       <NutritionDetailModal section={nutritionSection} onClose={() => setOpenKey(null)} />
@@ -803,6 +911,12 @@ function DashboardContent({
     );
   };
 
+  // ── Plan task checklist ───────────────────────────────────────────────────
+  const planTaskLog    = useStore((s) => s.planTaskLog);
+  const setPlanTaskLog = useStore((s) => s.setPlanTaskLog);
+  const togglePlanTask = useStore((s) => s.togglePlanTask);
+  const storedPlanTasks = planTaskLog[dateKey] ?? null;
+
   // ── Labs analysis ─────────────────────────────────────────────────────
   const bwAnalysis = latestBloodwork ? analyzeBloodwork(latestBloodwork.panel) : null;
 
@@ -862,6 +976,50 @@ function DashboardContent({
   const planDetails    = generatePlanDetails(displayScore, todayMood, todayPlan ?? null, todayEntry);
   const recommendations = unified.recommended_modalities;
   const recSummary      = unified.training_impact;
+
+  // ── Plan task sync ────────────────────────────────────────────────────────
+  // Build nutrition task texts outside the effect so they can be used as a
+  // stable dependency key (string primitives compare by value in useEffect).
+  const nutritionTaskTexts = getNutritionTaskTexts(planDetails.nutrition);
+
+  // Stable hash of the current instruction set — changes only when the score
+  // tier or mood tier shifts, not on every render.
+  const planDetailsKey = [
+    ...planDetails.training.instructions,
+    ...planDetails.recovery.instructions,
+    ...planDetails.mobility.instructions,
+    ...nutritionTaskTexts,
+  ].join("\u0000");
+
+  // Sync stored tasks with freshly generated instructions; preserve completion.
+  useEffect(() => {
+    const fresh = buildPlanTasks(dateKey, planDetails, nutritionTaskTexts, false);
+    if (!storedPlanTasks) {
+      setPlanTaskLog(dateKey, fresh);
+      return;
+    }
+    const storedKey = storedPlanTasks.map((t) => t.text).join("\u0000");
+    const freshKey  = fresh.map((t) => t.text).join("\u0000");
+    if (storedKey === freshKey) return; // texts unchanged — no update needed
+    // Instructions changed (score tier shift) — merge completion where IDs match
+    const merged = fresh.map((t) => {
+      const stored = storedPlanTasks.find((s) => s.id === t.id);
+      return stored ? { ...t, completed: stored.completed } : t;
+    });
+    setPlanTaskLog(dateKey, merged);
+  // planDetailsKey changes only when instruction content actually changes
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dateKey, planDetailsKey]);
+
+  // Toggle handler — updates store + fires Supabase as fire-and-forget
+  const handleTogglePlanTask = (taskId: string) => {
+    togglePlanTask(dateKey, taskId);
+    const current = planTaskLog[dateKey] ?? [];
+    const updated = current.map((t) =>
+      t.id === taskId ? { ...t, completed: !t.completed } : t
+    );
+    upsertPlanTasks(dateKey, updated);
+  };
 
   // ── Sleep card details ────────────────────────────────────────────────
   const sleepDetails = [
@@ -966,7 +1124,12 @@ function DashboardContent({
       </div>
 
       {/* ── Today's Plan ────────────────────────────────────────────────── */}
-      <TodaysPlanCard plan={dailyPlan} details={planDetails} />
+      <TodaysPlanCard
+        plan={dailyPlan}
+        details={planDetails}
+        tasks={storedPlanTasks ?? []}
+        onToggle={handleTogglePlanTask}
+      />
 
       {/* ── Daily Tasks ─────────────────────────────────────────────────── */}
       <CompletedTasksCard

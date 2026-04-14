@@ -355,6 +355,31 @@ export interface CoachingPreferences {
   mode: CoachMode;
 }
 
+// ─── Plan Task Items (per-instruction checklist inside Today's Plan) ─────────
+
+export type PlanCategory = "training" | "recovery" | "mobility" | "nutrition" | "rehab";
+
+export interface PlanTaskItem {
+  /** Stable ID — `${date}-${category}-${index}` */
+  id:        string;
+  text:      string;
+  category:  PlanCategory;
+  completed: boolean;
+}
+
+// ─── Daily Task Completion ────────────────────────────────────────────────────
+
+export interface DailyTaskCompletion {
+  date:                 string;  // YYYY-MM-DD
+  training_completed:   boolean;
+  recovery_completed:   boolean;
+  nutrition_completed:  boolean;
+  rehab_completed:      boolean;  // only meaningful when injury is active
+}
+
+/** XP awarded per completed task. */
+export const TASK_XP = 25;
+
 // ─── Performance Profile ─────────────────────────────────────────────────────
 
 export const PERFORMANCE_GOALS = [
@@ -397,6 +422,10 @@ export interface AppState {
   trainingPlan: TrainingPlan | null;
   // Daily mood (1–5, keyed by YYYY-MM-DD)
   moodLog: Record<string, number>;
+  // Daily task completion (keyed by YYYY-MM-DD)
+  taskLog: Record<string, DailyTaskCompletion>;
+  // Per-instruction plan task checklist (keyed by YYYY-MM-DD)
+  planTaskLog: Record<string, PlanTaskItem[]>;
   // Performance profile
   performanceProfile: PerformanceProfile | null;
   // Settings
@@ -413,5 +442,8 @@ export interface AppState {
   setAdjustedScore: (date: string, score: number | null) => void;
   setTrainingPlan: (plan: TrainingPlan | null) => void;
   setMood: (date: string, rating: number) => void;
+  toggleTask: (date: string, task: keyof Omit<DailyTaskCompletion, "date">) => void;
+  setPlanTaskLog:  (date: string, tasks: PlanTaskItem[]) => void;
+  togglePlanTask:  (date: string, taskId: string) => void;
   setPerformanceProfile: (profile: PerformanceProfile | null) => void;
 }
