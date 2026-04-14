@@ -5,7 +5,9 @@ import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import type { TrainingDay, WeekDay, TrainingType, IntensityLevel } from "@/lib/types";
 
-const client = new Anthropic();
+const client = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY,
+});
 
 // ─── PDF text extraction ──────────────────────────────────────────────────────
 // Uses pdf-parse v1 (battle-tested CJS library).
@@ -222,6 +224,13 @@ export async function POST(req: NextRequest) {
   }
 
   // 4. Send to Claude
+  if (!process.env.ANTHROPIC_API_KEY) {
+    return NextResponse.json(
+      { error: "Server misconfiguration: missing ANTHROPIC_API_KEY." },
+      { status: 500 }
+    );
+  }
+
   const today  = new Date().toISOString().split("T")[0];
   const prompt = buildPrompt(rawText, today);
 
