@@ -1,116 +1,179 @@
-// Force Node.js runtime — required for Buffer APIs and pdfjs-dist.
-// Must NOT run in Edge Runtime.
+// Force Node.js runtime — required for Buffer APIs.
 export const runtime = "nodejs";
 
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
-import path from "path";
 import type { TrainingDay, WeekDay, TrainingType, IntensityLevel } from "@/lib/types";
-
-// ─── PDF extraction (pdfjs-dist) ──────────────────────────────────────────────
-// pdfjs-dist v5 is ESM-only. webpackIgnore prevents webpack from emitting a
-// broken require() call; Node.js resolves the ESM module natively at runtime.
-async function extractPDFText(buffer: Buffer): Promise<string> {
-  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-  // @ts-ignore
-  const pdfjsLib = await import(
-    /* webpackIgnore: true */
-    "pdfjs-dist/legacy/build/pdf.mjs"
-  );
-
-  const workerPath = path.resolve(
-    process.cwd(),
-    "node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs"
-  );
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `file://${workerPath}`;
-
-  const uint8Array = new Uint8Array(buffer);
-  const pdfDoc     = await pdfjsLib.getDocument({ data: uint8Array }).promise;
-
-  let text = "";
-  for (let i = 1; i <= pdfDoc.numPages; i++) {
-    const page    = await pdfDoc.getPage(i);
-    const content = await page.getTextContent();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const strings = content.items.map((item: any) => item.str ?? "");
-    text += strings.join(" ") + "\n";
-  }
-  return text;
-}
 
 const client = new Anthropic();
 
+// ─── PDF text extraction ──────────────────────────────────────────────────────
+// Uses pdf-parse v1 (battle-tested CJS library).
+// Required via lib path to avoid Next.js dev-mode test check in index.js.
+async function extractPDFText(buffer: Buffer): Promise<string> {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const pdfParse = require("pdf-parse/lib/pdf-parse") as (
+    buf: Buffer
+  ) => Promise<{ text: string; numpages: number }>;
+
+  const result = await pdfParse(buffer);
+  console.log("[pdf] pages:", result.numpages, "| chars:", result.text.length);
+  return result.text;
+}
+
+// ─── Text cleaning ─────────────────────────────────────────────────────────────
+// pdf-parse output can have excessive whitespace and odd spacing.
+// Normalise before sending to Claude so the model gets cleaner input.
+function cleanText(raw: string): string {
+  return raw
+    .replace(/\r\n/g, "\n")          // normalise line endings
+    .replace(/[ \t]{2,}/g, " ")      // collapse repeated spaces/tabs
+    .replace(/\n{3,}/g, "\n\n")      // collapse excessive blank lines
+    .trim();
+}
+
+// ─── Validation helpers ────────────────────────────────────────────────────────
 const WEEK_DAYS: WeekDay[] = [
   "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday",
 ];
-const TRAINING_TYPES: TrainingType[] = [
-  "strength", "practice", "game", "recovery", "cardio", "off",
-];
-const INTENSITY_LEVELS: IntensityLevel[] = ["low", "moderate", "high"];
-const DISTANCE_UNITS = ["mi", "km"] as const;
+const VALID_TYPES    = new Set<string>(["strength","practice","game","recovery","cardio","off"]);
+const VALID_INTENSITY = new Set<string>(["low","moderate","high"]);
+const VALID_UNITS    = new Set<string>(["mi","km"]);
 
-function clampDuration(d: unknown): number {
-  const n = typeof d === "number" ? d : parseInt(String(d ?? 0), 10);
-  if (isNaN(n) || n < 0) return 0;
-  return Math.min(Math.max(n, 0), 300);
+function clampInt(v: unknown, max = 300): number {
+  const n = typeof v === "number" ? v : parseInt(String(v ?? 0), 10);
+  return isNaN(n) ? 0 : Math.min(Math.max(n, 0), max);
 }
 
-function clampDistance(d: unknown): number | undefined {
-  if (d === null || d === undefined || d === "") return undefined;
-  const n = typeof d === "number" ? d : parseFloat(String(d));
-  if (isNaN(n) || n <= 0) return undefined;
-  return Math.min(n, 1000);
+function clampFloat(v: unknown): number | undefined {
+  if (v === null || v === undefined || v === "") return undefined;
+  const n = typeof v === "number" ? v : parseFloat(String(v));
+  return isNaN(n) || n <= 0 ? undefined : Math.min(n, 9999);
 }
 
 function validateDay(raw: unknown): TrainingDay | null {
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Record<string, unknown>;
 
-  const day           = r.day as string;
-  const training_type = r.training_type as string;
-  const intensity     = r.intensity as string;
+  const day           = String(r.day ?? "");
+  const training_type = String(r.training_type ?? "");
+  const intensity     = String(r.intensity ?? "");
 
-  if (!WEEK_DAYS.includes(day as WeekDay)) return null;
-  if (!TRAINING_TYPES.includes(training_type as TrainingType)) return null;
-  if (!INTENSITY_LEVELS.includes(intensity as IntensityLevel)) return null;
+  if (!WEEK_DAYS.includes(day as WeekDay))     return null;
+  if (!VALID_TYPES.has(training_type))         return null;
+  if (!VALID_INTENSITY.has(intensity))         return null;
 
-  const distance     = clampDistance(r.distance);
+  const distance     = clampFloat(r.distance);
   const rawUnit      = typeof r.distanceUnit === "string" ? r.distanceUnit.toLowerCase() : null;
-  const distanceUnit = rawUnit && (DISTANCE_UNITS as readonly string[]).includes(rawUnit)
+  const distanceUnit = rawUnit && VALID_UNITS.has(rawUnit)
     ? (rawUnit as "mi" | "km")
     : (distance !== undefined ? "mi" : undefined);
-
-  const subtypeRaw  = typeof r.subtype === "string" && r.subtype.trim() ? r.subtype.trim() : undefined;
+  const subtype = typeof r.subtype === "string" && r.subtype.trim()
+    ? r.subtype.trim() : undefined;
 
   return {
     day:           day as WeekDay,
     training_type: training_type as TrainingType,
-    duration:      clampDuration(r.duration),
+    duration:      clampInt(r.duration),
     intensity:     intensity as IntensityLevel,
-    notes:         typeof r.notes === "string" && r.notes ? r.notes : undefined,
-    ...(subtypeRaw   !== undefined ? { subtype: subtypeRaw }       : {}),
-    ...(distance     !== undefined ? { distance }                   : {}),
-    ...(distanceUnit !== undefined ? { distanceUnit }               : {}),
+    ...(r.notes    ? { notes: String(r.notes) }   : {}),
+    ...(subtype    ? { subtype }                   : {}),
+    ...(distance   !== undefined ? { distance }    : {}),
+    ...(distanceUnit             ? { distanceUnit } : {}),
   };
 }
 
 function fillMissingDays(days: TrainingDay[]): TrainingDay[] {
-  const daySet = new Set(days.map((d) => d.day));
-  const filled = [...days];
+  const seen = new Set(days.map((d) => d.day));
+  const all  = [...days];
   for (const day of WEEK_DAYS) {
-    if (!daySet.has(day)) {
-      filled.push({ day, training_type: "off", duration: 0, intensity: "low" });
-    }
+    if (!seen.has(day))
+      all.push({ day, training_type: "off", duration: 0, intensity: "low" });
   }
-  filled.sort((a, b) => WEEK_DAYS.indexOf(a.day) - WEEK_DAYS.indexOf(b.day));
-  return filled;
+  all.sort((a, b) => WEEK_DAYS.indexOf(a.day) - WEEK_DAYS.indexOf(b.day));
+  return all;
 }
 
-export async function POST(req: NextRequest) {
-  let formData: FormData;
+// ─── Robust JSON array extractor ─────────────────────────────────────────────
+// Claude sometimes wraps JSON in explanation text or markdown.
+// This finds the first [...] block regardless of surrounding content.
+function extractJSONArray(text: string): unknown[] {
+  // Strip markdown fences
+  const stripped = text
+    .replace(/^```(?:json)?\r?\n?/m, "")
+    .replace(/\r?\n?```$/m, "")
+    .trim();
+
+  // Try direct parse first
   try {
-    formData = await req.formData();
-  } catch {
+    const parsed = JSON.parse(stripped);
+    if (Array.isArray(parsed)) return parsed;
+  } catch { /* fall through */ }
+
+  // Find the outermost [...] block
+  const start = stripped.indexOf("[");
+  const end   = stripped.lastIndexOf("]");
+  if (start !== -1 && end > start) {
+    const arr = JSON.parse(stripped.slice(start, end + 1));
+    if (Array.isArray(arr)) return arr;
+  }
+
+  throw new Error("No JSON array found in Claude response");
+}
+
+// ─── Claude prompt ─────────────────────────────────────────────────────────────
+function buildPrompt(text: string, today: string): string {
+  return `You are an expert training plan parser for athletes. Today's date is ${today}.
+
+Analyse the training document below and extract ONE week of training — the current week if dates are visible, otherwise the first full week in the document.
+
+The document may be:
+- A multi-week marathon or race training plan (tables, columns, or lists)
+- A weekly team practice schedule
+- A strength and conditioning program
+- A mix of running, cross-training, and rest days
+
+Return ONLY a valid JSON array of exactly 7 objects (Monday through Sunday). No markdown, no explanation, no extra text — just the raw JSON array.
+
+Each object requires these fields:
+  "day"          — one of: "Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"
+  "training_type"— one of: "strength","practice","game","recovery","cardio","off"
+                   • Run/Bike/Swim/Row/Cardio → "cardio"
+                   • Weights/Gym/Lift → "strength"
+                   • Team practice/Drill/Skills → "practice"
+                   • Race/Competition/Game/Match → "game"
+                   • Easy/Yoga/Stretch/Mobility/Active recovery → "recovery"
+                   • Rest/Off/Nothing → "off"
+  "duration"     — integer minutes (estimate if not stated; 0 for rest days)
+                   typical defaults: easy run 30-45, long run 90-120, tempo 45-60,
+                   strength 45-60, practice 75-90, game 120, recovery 30
+  "intensity"    — one of: "low","moderate","high"
+                   • Easy/recovery run/jog/yoga/walk → "low"
+                   • Tempo/threshold/long run/moderate effort/practice → "moderate"
+                   • Intervals/speed work/race/heavy lift/game → "high"
+
+Optional fields (include when the document has this info):
+  "subtype"      — specific session label, e.g. "Long Run","Tempo Run","Intervals",
+                   "Easy Run","Hill Run","Fartlek","Full Body","Upper Body","Yoga"
+  "distance"     — numeric value (miles or km)
+  "distanceUnit" — "mi" or "km"
+
+Rules:
+- ALL 7 days must be present. Days with no session → training_type "off", duration 0, intensity "low"
+- If the document is a multi-week plan, extract the FIRST week or the week matching today's date
+- If a day lists multiple sessions, pick the primary one
+- Return ONLY the JSON array — no other text
+
+Document:
+${text.slice(0, 12000)}`;
+}
+
+// ─── POST handler ──────────────────────────────────────────────────────────────
+export async function POST(req: NextRequest) {
+  // 1. Parse form data
+  let formData: FormData;
+  try { formData = await req.formData(); }
+  catch {
     return NextResponse.json({ error: "Invalid multipart form data." }, { status: 400 });
   }
 
@@ -123,36 +186,23 @@ export async function POST(req: NextRequest) {
   const mimeType = file.type;
   let rawText = "";
 
-  // ── Extract text ────────────────────────────────────────────────────────────
-  if (
-    fileName.endsWith(".csv") ||
-    mimeType === "text/csv" ||
-    mimeType === "application/csv" ||
-    mimeType === "text/plain"
-  ) {
+  // 2. Extract text
+  if (fileName.endsWith(".csv") || mimeType.includes("csv") || mimeType.includes("text/plain")) {
     rawText = await file.text();
-  } else if (fileName.endsWith(".pdf") || mimeType === "application/pdf") {
+    console.log("[upload] CSV text length:", rawText.length);
+
+  } else if (fileName.endsWith(".pdf") || mimeType.includes("pdf")) {
     try {
       const buffer = Buffer.from(await file.arrayBuffer());
-      const text   = await extractPDFText(buffer);
-
-      console.log("Extracted text:", text.slice(0, 500));
-
-      if (!text.trim()) {
-        return NextResponse.json(
-          { error: "Unable to extract text from PDF." },
-          { status: 422 }
-        );
-      }
-
-      rawText = text;
+      rawText = await extractPDFText(buffer);
     } catch (err) {
-      console.error("[parse-training-plan] PDF extraction failed:", err);
+      console.error("[upload] PDF extraction error:", err);
       return NextResponse.json(
-        { error: "Unable to extract text from PDF." },
+        { error: "Could not read the PDF. Make sure it is a text-based PDF, not a scanned image." },
         { status: 422 }
       );
     }
+
   } else {
     return NextResponse.json(
       { error: "Unsupported file type. Upload a PDF or CSV." },
@@ -160,88 +210,62 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  if (!rawText.trim()) {
+  // 3. Clean and validate extracted text
+  rawText = cleanText(rawText);
+  console.log("[upload] Extracted text preview:\n", rawText.slice(0, 600));
+
+  if (rawText.trim().length < 20) {
     return NextResponse.json(
-      { error: "No text could be extracted from the file." },
+      { error: "Could not extract readable text from the file. Make sure it is a text-based PDF." },
       { status: 422 }
     );
   }
 
-  // ── Parse with Claude ───────────────────────────────────────────────────────
-  const prompt = `You are a structured training schedule parser for athletes.
+  // 4. Send to Claude
+  const today  = new Date().toISOString().split("T")[0];
+  const prompt = buildPrompt(rawText, today);
 
-Extract a 7-day weekly training plan from the text below. Return ONLY a valid JSON array of exactly 7 objects — one per day, Monday through Sunday. No markdown, no explanation.
-
-Each object must have these fields:
-
-REQUIRED:
-- "day": one of "Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"
-- "training_type": category — one of "strength","practice","game","recovery","cardio","off"
-  · Run/Bike/Swim/Row → "cardio"
-  · Lift/Weights/Gym → "strength"
-  · Team session/Drill → "practice"
-  · Competition/Race/Match → "game"
-  · Yoga/Stretch/Mobility/Easy → "recovery"
-  · Rest/Nothing → "off"
-- "duration": integer minutes (0 for off days; estimate if unstated — typical: strength 60, cardio 45, practice 90, game 120)
-- "intensity": one of "low","moderate","high"
-  · Easy Run / Jog / Walk / Yoga → "low"
-  · Long Run / Tempo / Threshold / Moderate cardio / Practice → "moderate"
-  · Intervals / Sprints / Race / Heavy lift / Game → "high"
-
-OPTIONAL (omit when not applicable or unknown):
-- "subtype": specific session variant — examples:
-    cardio    → "Easy Run" | "Tempo Run" | "Long Run" | "Intervals" | "Fartlek" | "Hill Run" | "Progression Run" | "Bike" | "Swim" | "Row"
-    strength  → "Upper Body" | "Lower Body" | "Full Body" | "Power" | "Core" | "Push Day" | "Pull Day"
-    practice  → "Drills" | "Skill Work" | "Scrimmage" | "Tactics"
-    recovery  → "Yoga" | "Mobility" | "Stretching" | "Active Recovery" | "Walk"
-    game      → "Race" | "Tournament" | "Scrimmage"
-- "distance": numeric distance value (omit for time-based sessions)
-- "distanceUnit": "mi" or "km" (required if distance is set; default "mi")
-
-Rules:
-- ALL 7 days must be present. Days not mentioned → training_type "off", duration 0, intensity "low"
-- Return ONLY the raw JSON array.
-- Cap duration at 300 minutes.
-
-Text to parse:
-${rawText.slice(0, 8000)}`;
-
+  let claudeRaw = "";
   try {
     const message = await client.messages.create({
-      model: "claude-sonnet-4-6",
-      max_tokens: 1024,
-      messages: [{ role: "user", content: prompt }],
+      model:      "claude-sonnet-4-6",
+      max_tokens: 2048,
+      messages:   [{ role: "user", content: prompt }],
     });
 
     const content = message.content[0];
-    if (content.type !== "text") {
-      throw new Error("Unexpected Claude response type");
-    }
+    if (content.type !== "text") throw new Error("Unexpected Claude response type");
+    claudeRaw = content.text;
+    console.log("[claude] Raw response:\n", claudeRaw.slice(0, 800));
 
-    // Strip markdown fences if present
-    let jsonText = content.text.trim();
-    jsonText = jsonText.replace(/^```(?:json)?\r?\n?/, "").replace(/\r?\n?```$/, "").trim();
+  } catch (err) {
+    console.error("[claude] API error:", err);
+    return NextResponse.json(
+      { error: "AI parsing failed. Please try again." },
+      { status: 502 }
+    );
+  }
 
-    const rawArray = JSON.parse(jsonText);
-    if (!Array.isArray(rawArray)) throw new Error("Claude did not return an array");
-
-    const validDays: TrainingDay[] = [];
-    for (const item of rawArray) {
-      const validated = validateDay(item);
-      if (validated) validDays.push(validated);
-    }
+  // 5. Parse and validate Claude's JSON
+  try {
+    const rawArray  = extractJSONArray(claudeRaw);
+    const validDays = rawArray
+      .map(validateDay)
+      .filter((d): d is TrainingDay => d !== null);
 
     if (validDays.length === 0) {
-      throw new Error("No valid days in Claude response");
+      console.error("[claude] No valid days. Raw response:", claudeRaw);
+      throw new Error("No valid training days extracted");
     }
 
     const allDays = fillMissingDays(validDays);
+    console.log("[result] Returning", allDays.length, "days");
     return NextResponse.json({ days: allDays });
+
   } catch (err) {
-    console.error("[parse-training-plan] Claude parse error:", err);
+    console.error("[claude] Parse error:", err, "\nRaw:", claudeRaw);
     return NextResponse.json(
-      { error: "Could not parse a training schedule from the file. Check the format and try again." },
+      { error: "AI could not interpret the training schedule. Try a simpler format or paste the text manually." },
       { status: 422 }
     );
   }
