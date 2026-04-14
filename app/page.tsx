@@ -1,0 +1,1002 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { format } from "date-fns";
+import Link from "next/link";
+import { useStore, useLatestBloodwork } from "@/lib/store";
+import { getEffectiveScore } from "@/lib/recovery-engine";
+import { generateCoachMessage } from "@/lib/coaching";
+import { generateSeedData } from "@/lib/seed-data";
+import RecoveryScoreRing from "@/components/ui/RecoveryScoreRing";
+import ScoreOverride from "@/components/ui/ScoreOverride";
+import {
+  Moon, Zap, Dumbbell, Utensils, FlaskConical,
+  ChevronRight, TrendingUp, PlusCircle, X,
+} from "lucide-react";
+import { analyzeBloodwork } from "@/lib/bloodwork-engine";
+import {
+  unifiedRecoveryEngine,
+  buildUnifiedInput,
+  type ModalityRecommendation,
+} from "@/lib/modality-recommendations";
+import { upsertDailyCheckin } from "@/lib/supabase";
+import { generateDailyPlan, type DailyPlan } from "@/lib/daily-plan";
+import { generatePlanDetails, type PlanSection, type NutritionSection, type PlanDetails } from "@/lib/plan-details";
+import {
+  generateAIPrescriptions,
+  type AIPrescriptionOutput,
+  type AIRecoveryProtocol,
+  type AIMobilityProtocol,
+  type AINutritionProtocol,
+} from "@/lib/ai-prescriptions";
+import {
+  getTodayDay, getTomorrowDay, getDayPlan, TYPE_COLOR, TYPE_LABEL,
+} from "@/lib/training-engine";
+import type { RecoveryScore, DailyEntry, TrainingPlan } from "@/lib/types";
+
+// ─── Breakdown card ──────────────────────────────────────────────────────
+
+function ScoreCard({
+  icon,
+  label,
+  score,
+  details,
+  fullWidth = false,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  score: number;
+  details: string[];
+  fullWidth?: boolean;
+}) {
+  const color =
+    score >= 71 ? "#22C55E" : score >= 41 ? "#F59E0B" : "#EF4444";
+
+  return (
+    <div
+      className={`bg-bg-card border border-bg-border rounded-2xl p-4 flex flex-col gap-3 ${
+        fullWidth ? "col-span-2" : ""
+      }`}
+    >
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-text-muted">{icon}</span>
+          <span className="text-xs font-semibold text-text-secondary uppercase tracking-wider">
+            {label}
+          </span>
+        </div>
+        <span className="text-2xl font-extrabold tabular-nums" style={{ color }}>
+          {Math.round(score)}
+        </span>
+      </div>
+
+      {/* Progress bar */}
+      <div className="h-1 w-full rounded-full bg-bg-border overflow-hidden">
+        <div
+          className="h-full rounded-full transition-all duration-700"
+          style={{ width: `${score}%`, backgroundColor: color }}
+        />
+      </div>
+
+      {/* Stats */}
+      <div className="flex flex-col gap-0.5">
+        {details.map((d, i) => (
+          <span key={i} className="text-xs text-text-muted leading-relaxed">
+            {d}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Mood picker ──────────────────────────────────────────────────────────
+
+const MOOD_EMOJI = ["😔", "😕", "😐", "🙂", "😄"] as const;
+
+function MoodPicker({
+  value,
+  onChange,
+}: {
+  value: number | null;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <div className="bg-bg-card border border-bg-border rounded-2xl px-5 py-4">
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-xs font-bold text-text-muted uppercase tracking-widest">
+          How do you feel today?
+        </p>
+        <div className="flex items-center gap-1.5">
+          <span className="text-2xs text-text-muted">low</span>
+          <span className="text-2xs text-text-muted mx-1">·</span>
+          <span className="text-2xs text-text-muted">great</span>
+        </div>
+      </div>
+      <div className="flex items-center justify-between gap-2">
+        {[1, 2, 3, 4, 5].map((n) => {
+          const active = value === n;
+          return (
+            <button
+              key={n}
+              onClick={() => onChange(n)}
+              className={`flex-1 flex flex-col items-center gap-1.5 py-2.5 rounded-xl transition-all ${
+                active
+                  ? "bg-gold/15 border border-gold/50"
+                  : "bg-bg-elevated border border-bg-border hover:border-text-muted/30"
+              }`}
+            >
+              <span className="text-xl leading-none">{MOOD_EMOJI[n - 1]}</span>
+              <span
+                className={`text-2xs font-bold tabular-nums ${
+                  active ? "text-gold" : "text-text-muted"
+                }`}
+              >
+                {n}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── Modality recommendation card ────────────────────────────────────────
+
+function ModalityCard({ rec }: { rec: ModalityRecommendation }) {
+  const durationLabel = rec.duration >= 60
+    ? `${rec.duration / 60}h`
+    : `${rec.duration} min`;
+
+  return (
+    <div className="bg-bg-card border border-bg-border rounded-2xl px-5 py-4 flex flex-col gap-2">
+      <div className="flex items-center gap-4">
+        <div className="w-9 h-9 rounded-xl bg-gold/10 border border-gold/20 flex items-center justify-center shrink-0">
+          <Zap size={16} className="text-gold" />
+        </div>
+        <span className="flex-1 text-sm font-semibold text-text-primary">{rec.name}</span>
+        <span className="text-xs font-bold text-gold tabular-nums shrink-0">{durationLabel}</span>
+      </div>
+      <p className="text-xs text-text-muted leading-relaxed pl-[52px]">{rec.reason}</p>
+    </div>
+  );
+}
+
+// ─── Today's Plan — detail modal ─────────────────────────────────────────
+
+function PlanDetailModal({
+  section,
+  onClose,
+}: {
+  section:  PlanSection | null;
+  onClose:  () => void;
+}) {
+  useEffect(() => {
+    if (!section) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [section, onClose]);
+
+  if (!section) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-lg bg-bg-card border border-bg-border rounded-t-3xl p-6 flex flex-col gap-5 max-h-[88vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-start justify-between gap-3">
+          <h2 className="text-base font-bold text-text-primary">{section.title}</h2>
+          <button onClick={onClose} className="text-text-muted hover:text-text-secondary shrink-0 mt-0.5">
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Overview */}
+        <div>
+          <p className="text-2xs font-bold text-text-muted uppercase tracking-widest mb-1.5">Overview</p>
+          <p className="text-sm text-text-primary leading-relaxed">{section.overview}</p>
+        </div>
+
+        <div className="h-px bg-bg-border" />
+
+        {/* Instructions */}
+        <div>
+          <p className="text-2xs font-bold text-text-muted uppercase tracking-widest mb-2.5">Instructions</p>
+          <ul className="flex flex-col gap-2.5">
+            {section.instructions.map((step, i) => (
+              <li key={i} className="flex items-start gap-3">
+                <span className="text-gold font-bold text-xs mt-0.5 shrink-0 tabular-nums w-4">{i + 1}</span>
+                <p className="text-xs text-text-primary leading-relaxed">{step}</p>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <div className="h-px bg-bg-border" />
+
+        {/* Structure */}
+        <div>
+          <p className="text-2xs font-bold text-text-muted uppercase tracking-widest mb-1.5">Structure</p>
+          <p className="text-xs font-mono bg-bg-elevated border border-bg-border rounded-xl px-3 py-2.5 text-text-secondary leading-relaxed">
+            {section.structure}
+          </p>
+        </div>
+
+        <div className="h-px bg-bg-border" />
+
+        {/* Coaching note */}
+        <div>
+          <p className="text-2xs font-bold text-text-muted uppercase tracking-widest mb-1.5">Coach's Note</p>
+          <p className="text-xs text-gold leading-relaxed">{section.coachingNote}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Today's Plan — nutrition detail modal ───────────────────────────────
+
+function NutritionDetailModal({
+  section,
+  onClose,
+}: {
+  section: NutritionSection | null;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    if (!section) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [section, onClose]);
+
+  if (!section) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-lg bg-bg-card border border-bg-border rounded-t-3xl p-6 flex flex-col gap-5 max-h-[88vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-start justify-between gap-3">
+          <h2 className="text-base font-bold text-text-primary">{section.title}</h2>
+          <button onClick={onClose} className="text-text-muted hover:text-text-secondary shrink-0 mt-0.5">
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Overview */}
+        <div>
+          <p className="text-2xs font-bold text-text-muted uppercase tracking-widest mb-1.5">Overview</p>
+          <p className="text-sm text-text-primary leading-relaxed">{section.overview}</p>
+        </div>
+
+        <div className="h-px bg-bg-border" />
+
+        {/* Protein */}
+        <div>
+          <p className="text-2xs font-bold text-text-muted uppercase tracking-widest mb-2">Protein Target</p>
+          <div className="flex items-baseline gap-2 mb-1.5">
+            <span className="text-xl font-extrabold text-gold tabular-nums">{section.protein.totalGrams}g</span>
+            <span className="text-xs text-text-muted">daily · {section.protein.perMeal}g per meal</span>
+          </div>
+          <p className="text-xs text-text-primary leading-relaxed mb-2">{section.protein.guidance}</p>
+          <ul className="flex flex-col gap-1">
+            {section.protein.foods.map((f, i) => (
+              <li key={i} className="text-xs text-text-muted leading-relaxed flex items-start gap-2">
+                <span className="text-gold mt-0.5 shrink-0">·</span>
+                {f}
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <div className="h-px bg-bg-border" />
+
+        {/* Carbs */}
+        <div>
+          <p className="text-2xs font-bold text-text-muted uppercase tracking-widest mb-2">Carbohydrates</p>
+          <div className="flex items-baseline gap-2 mb-1.5">
+            <span className="text-xl font-extrabold text-gold tabular-nums">{section.carbs.totalGrams}g</span>
+            <span className="text-xs text-text-muted">daily</span>
+          </div>
+          <p className="text-xs text-text-primary leading-relaxed mb-2">{section.carbs.timing}</p>
+          <ul className="flex flex-col gap-1">
+            {section.carbs.foods.map((f, i) => (
+              <li key={i} className="text-xs text-text-muted leading-relaxed flex items-start gap-2">
+                <span className="text-gold mt-0.5 shrink-0">·</span>
+                {f}
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <div className="h-px bg-bg-border" />
+
+        {/* Hydration */}
+        <div>
+          <p className="text-2xs font-bold text-text-muted uppercase tracking-widest mb-2">Hydration</p>
+          <div className="flex items-baseline gap-2 mb-1.5">
+            <span className="text-xl font-extrabold text-gold tabular-nums">{section.hydration.totalOz}oz</span>
+            <span className="text-xs text-text-muted">target today</span>
+          </div>
+          <p className="text-xs text-text-primary leading-relaxed">{section.hydration.schedule}</p>
+        </div>
+
+        {/* Micronutrients (optional) */}
+        {section.micronutrients && (
+          <>
+            <div className="h-px bg-bg-border" />
+            <div>
+              <p className="text-2xs font-bold text-text-muted uppercase tracking-widest mb-2">Micronutrients</p>
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {section.micronutrients.focus.map((m, i) => (
+                  <span key={i} className="text-2xs font-bold px-2 py-0.5 rounded-full bg-gold/10 border border-gold/20 text-gold">
+                    {m}
+                  </span>
+                ))}
+              </div>
+              <p className="text-xs text-text-muted leading-relaxed">{section.micronutrients.note}</p>
+            </div>
+          </>
+        )}
+
+        <div className="h-px bg-bg-border" />
+
+        {/* Coaching note */}
+        <div>
+          <p className="text-2xs font-bold text-text-muted uppercase tracking-widest mb-1.5">Coach's Note</p>
+          <p className="text-xs text-gold leading-relaxed">{section.coachingNote}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── AI modals (shared shell) ────────────────────────────────────────────
+
+function AIModalShell({
+  title,
+  onClose,
+  children,
+}: {
+  title:   string;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-lg bg-bg-card border border-bg-border rounded-t-3xl p-6 flex flex-col gap-5 max-h-[88vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <h2 className="text-base font-bold text-text-primary">{title}</h2>
+          <button onClick={onClose} className="text-text-muted hover:text-text-secondary shrink-0 mt-0.5">
+            <X size={18} />
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function AISectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="text-2xs font-bold text-text-muted uppercase tracking-widest mb-1.5">
+      {children}
+    </p>
+  );
+}
+
+function AIDivider() {
+  return <div className="h-px bg-bg-border" />;
+}
+
+// ─── AI Recovery modal ────────────────────────────────────────────────────
+
+function AIRecoveryModal({
+  protocol,
+  onClose,
+}: {
+  protocol: AIRecoveryProtocol | null;
+  onClose:  () => void;
+}) {
+  if (!protocol) return null;
+  return (
+    <AIModalShell title="Today's Recovery" onClose={onClose}>
+      <div>
+        <AISectionLabel>Overview</AISectionLabel>
+        <p className="text-sm text-text-primary leading-relaxed">{protocol.overview}</p>
+      </div>
+      <AIDivider />
+      <div>
+        <AISectionLabel>Primary Modality</AISectionLabel>
+        <p className="text-xs text-text-primary leading-relaxed">{protocol.primary_modality}</p>
+      </div>
+      <AIDivider />
+      <div>
+        <AISectionLabel>Secondary Modality</AISectionLabel>
+        <p className="text-xs text-text-primary leading-relaxed">{protocol.secondary_modality}</p>
+      </div>
+      <AIDivider />
+      <div>
+        <AISectionLabel>Timing</AISectionLabel>
+        <p className="text-xs font-mono bg-bg-elevated border border-bg-border rounded-xl px-3 py-2.5 text-text-secondary leading-relaxed">
+          {protocol.timing}
+        </p>
+      </div>
+      <AIDivider />
+      <div>
+        <AISectionLabel>Coach's Note</AISectionLabel>
+        <p className="text-xs text-gold leading-relaxed">{protocol.coaching_note}</p>
+      </div>
+    </AIModalShell>
+  );
+}
+
+// ─── AI Mobility modal ────────────────────────────────────────────────────
+
+function AIMobilityModal({
+  protocol,
+  onClose,
+}: {
+  protocol: AIMobilityProtocol | null;
+  onClose:  () => void;
+}) {
+  if (!protocol) return null;
+  const movements = [protocol.movement_1, protocol.movement_2, protocol.movement_3];
+  return (
+    <AIModalShell title="Today's Mobility" onClose={onClose}>
+      <div>
+        <AISectionLabel>Overview</AISectionLabel>
+        <p className="text-sm text-text-primary leading-relaxed">{protocol.overview}</p>
+      </div>
+      <AIDivider />
+      <div>
+        <AISectionLabel>Movements</AISectionLabel>
+        <ul className="flex flex-col gap-2.5">
+          {movements.map((m, i) => (
+            <li key={i} className="flex items-start gap-3">
+              <span className="text-gold font-bold text-xs mt-0.5 shrink-0 tabular-nums w-4">{i + 1}</span>
+              <p className="text-xs text-text-primary leading-relaxed">{m}</p>
+            </li>
+          ))}
+        </ul>
+      </div>
+      <AIDivider />
+      <div>
+        <AISectionLabel>Structure</AISectionLabel>
+        <p className="text-xs font-mono bg-bg-elevated border border-bg-border rounded-xl px-3 py-2.5 text-text-secondary leading-relaxed">
+          {protocol.structure}
+        </p>
+      </div>
+      <AIDivider />
+      <div>
+        <AISectionLabel>Coach's Note</AISectionLabel>
+        <p className="text-xs text-gold leading-relaxed">{protocol.coaching_note}</p>
+      </div>
+    </AIModalShell>
+  );
+}
+
+// ─── AI Nutrition modal ───────────────────────────────────────────────────
+
+function AINutritionModal({
+  protocol,
+  onClose,
+}: {
+  protocol: AINutritionProtocol | null;
+  onClose:  () => void;
+}) {
+  if (!protocol) return null;
+  return (
+    <AIModalShell title="Today's Nutrition" onClose={onClose}>
+      <div>
+        <AISectionLabel>Overview</AISectionLabel>
+        <p className="text-sm text-text-primary leading-relaxed">{protocol.overview}</p>
+      </div>
+      <AIDivider />
+      <div>
+        <AISectionLabel>Protein</AISectionLabel>
+        <p className="text-xs text-text-primary leading-relaxed">{protocol.protein}</p>
+      </div>
+      <AIDivider />
+      <div>
+        <AISectionLabel>Carbohydrates</AISectionLabel>
+        <p className="text-xs text-text-primary leading-relaxed">{protocol.carbs}</p>
+      </div>
+      <AIDivider />
+      <div>
+        <AISectionLabel>Hydration</AISectionLabel>
+        <p className="text-xs text-text-primary leading-relaxed">{protocol.hydration}</p>
+      </div>
+      <AIDivider />
+      <div>
+        <AISectionLabel>Micronutrients</AISectionLabel>
+        <p className="text-xs text-text-primary leading-relaxed">{protocol.micronutrients}</p>
+      </div>
+      <AIDivider />
+      <div>
+        <AISectionLabel>Coach's Note</AISectionLabel>
+        <p className="text-xs text-gold leading-relaxed">{protocol.coaching_note}</p>
+      </div>
+    </AIModalShell>
+  );
+}
+
+// ─── Today's Plan card ───────────────────────────────────────────────────
+
+const PLAN_SECTIONS: Array<{
+  key:   keyof DailyPlan;
+  label: string;
+  icon:  React.ReactNode;
+}> = [
+  { key: "training",  label: "Training",  icon: <Dumbbell   size={12} /> },
+  { key: "recovery",  label: "Recovery",  icon: <Zap        size={12} /> },
+  { key: "mobility",  label: "Mobility",  icon: <TrendingUp size={12} /> },
+  { key: "nutrition", label: "Nutrition", icon: <Utensils   size={12} /> },
+];
+
+function TodaysPlanCard({ plan, details }: { plan: DailyPlan; details: PlanDetails }) {
+  const [openKey, setOpenKey] = useState<keyof DailyPlan | null>(null);
+  const nonNutritionSection = openKey && openKey !== "nutrition"
+    ? details[openKey] as PlanSection
+    : null;
+  const nutritionSection = openKey === "nutrition" ? details.nutrition : null;
+
+  return (
+    <>
+      <div className="bg-bg-card border border-bg-border rounded-2xl p-4 flex flex-col gap-3">
+        <p className="text-xs font-bold text-text-muted uppercase tracking-widest">
+          Today's Plan
+        </p>
+        {PLAN_SECTIONS.map(({ key, label, icon }, i) => (
+          <div key={key}>
+            {i > 0 && <div className="h-px bg-bg-border mb-3" />}
+            <button
+              className="w-full text-left group"
+              onClick={() => setOpenKey(key)}
+            >
+              <div className="flex items-center justify-between gap-2 mb-1.5">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-text-muted">{icon}</span>
+                  <span className="text-xs font-semibold text-text-secondary uppercase tracking-wider">
+                    {label}
+                  </span>
+                </div>
+                <ChevronRight size={12} className="text-text-muted shrink-0 group-hover:text-text-secondary transition-colors" />
+              </div>
+              <p className="text-xs text-text-primary leading-relaxed pl-[19px]">
+                {plan[key]}
+              </p>
+            </button>
+          </div>
+        ))}
+      </div>
+      <PlanDetailModal section={nonNutritionSection} onClose={() => setOpenKey(null)} />
+      <NutritionDetailModal section={nutritionSection} onClose={() => setOpenKey(null)} />
+    </>
+  );
+}
+
+// ─── Main Dashboard ───────────────────────────────────────────────────────
+
+export default function Dashboard() {
+  const todayScore      = useStore((s) => s.todayScore);
+  const todayEntry      = useStore((s) => s.todayEntry);
+  const coachingPrefs   = useStore((s) => s.coachingPrefs);
+  const upsertEntry     = useStore((s) => s.upsertEntry);
+  const upsertScore     = useStore((s) => s.upsertScore);
+  const scores          = useStore((s) => s.scores);
+  const trainingPlan    = useStore((s) => s.trainingPlan);
+  const moodLog         = useStore((s) => s.moodLog);
+  const setMood         = useStore((s) => s.setMood);
+  const latestBloodwork = useLatestBloodwork(90);
+
+  useEffect(() => {
+    if (Object.keys(scores).length === 0) {
+      const { entries, scores: seedScores } = generateSeedData();
+      Object.values(entries).forEach((e) => upsertEntry(e));
+      Object.values(seedScores).forEach((s) => upsertScore(s));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const today    = format(new Date(), "EEEE, MMMM d").toUpperCase();
+  const todayKey = format(new Date(), "yyyy-MM-dd");
+
+  if (!todayScore || !todayEntry) {
+    return <EmptyState today={today} />;
+  }
+
+  return <DashboardContent
+    todayScore={todayScore}
+    todayEntry={todayEntry}
+    coachMode={coachingPrefs.mode}
+    today={today}
+    latestBloodwork={latestBloodwork}
+    trainingPlan={trainingPlan}
+    todayMood={moodLog[todayKey] ?? null}
+    onMoodChange={(v) => {
+      setMood(todayKey, v);
+      upsertDailyCheckin(todayKey, v); // fire-and-forget; no-ops when Supabase not configured
+    }}
+  />;
+}
+
+function DashboardContent({
+  todayScore,
+  todayEntry,
+  coachMode,
+  today,
+  latestBloodwork,
+  trainingPlan,
+  todayMood,
+  onMoodChange,
+}: {
+  todayScore:    RecoveryScore;
+  todayEntry:    DailyEntry;
+  coachMode:     "hardcore" | "balanced" | "recovery";
+  today:         string;
+  latestBloodwork: ReturnType<typeof useLatestBloodwork>;
+  trainingPlan:  TrainingPlan | null;
+  todayMood:     number | null;
+  onMoodChange:  (v: number) => void;
+}) {
+  const { breakdown, confidence } = todayScore;
+
+  // ── Labs analysis ─────────────────────────────────────────────────────
+  const bwAnalysis = latestBloodwork ? analyzeBloodwork(latestBloodwork.panel) : null;
+
+  // ── Training plan context ─────────────────────────────────────────────
+  const todayDay    = getTodayDay();
+  const tomorrowDay = getTomorrowDay();
+  const todayPlan    = trainingPlan ? getDayPlan(trainingPlan, todayDay)    : null;
+  const tomorrowPlan = trainingPlan ? getDayPlan(trainingPlan, tomorrowDay) : null;
+
+  // ── Ring score — use the stored authoritative score (stages 1–7 already applied) ───
+  const score = getEffectiveScore(todayScore);
+
+  // ── Psych delta — mood readiness signal layered on top of the physiological score ──
+  // Formula: (moodRating - 3) × 7  →  range −14 to +14 pts
+  //   1 → −14  (athlete feels poor — score suppressed)
+  //   3 →   0  (neutral — no adjustment)
+  //   5 → +14  (athlete feels great — score boosted)
+  // Applied to display and recommendations only; the stored calculatedScore is unchanged.
+  const psychDelta   = todayMood !== null ? (todayMood - 3) * 7 : 0;
+  const displayScore = Math.max(0, Math.min(100, Math.round(score + psychDelta)));
+
+  // ── Unified recovery engine — used only for modality recommendations + impact text ──
+  // Pass bloodwork_modifier: 0 because the base score already includes the bloodwork delta
+  // from computeFinalRecoveryScore; applying it again here would double-count it.
+  // Pass todayMood so the engine can bias modality selection based on psych readiness.
+  const unifiedInput = buildUnifiedInput(
+    displayScore,
+    breakdown,
+    todayEntry,
+    todayPlan,
+    tomorrowPlan,
+    latestBloodwork?.panel ?? null,
+    0,
+    todayMood,
+  );
+  const unified = unifiedRecoveryEngine(unifiedInput);
+
+  const coachMessage   = generateCoachMessage(todayScore, coachMode);
+  const dailyPlan      = generateDailyPlan(displayScore, todayMood, todayPlan ?? null, todayEntry);
+  const planDetails    = generatePlanDetails(displayScore, todayMood, todayPlan ?? null, todayEntry);
+  const recommendations = unified.recommended_modalities;
+  const recSummary      = unified.training_impact;
+
+  // ── Sleep card details ────────────────────────────────────────────────
+  const sleepDetails = [
+    todayEntry.sleep.duration   ? `${todayEntry.sleep.duration}h sleep` : null,
+    todayEntry.sleep.hrv        ? `${todayEntry.sleep.hrv} HRV` : null,
+    todayEntry.sleep.restingHR  ? `${todayEntry.sleep.restingHR} RHR` : null,
+    todayEntry.sleep.qualityRating ? `Quality ${todayEntry.sleep.qualityRating}/5` : null,
+  ].filter(Boolean) as string[];
+
+  // ── Readiness card details ────────────────────────────────────────────
+  const readinessDetails = [
+    todayEntry.sleep.hrv       ? `HRV ${todayEntry.sleep.hrv}ms` : null,
+    todayEntry.sleep.restingHR ? `RHR ${todayEntry.sleep.restingHR}bpm` : null,
+  ].filter(Boolean) as string[];
+
+  // ── Training card details ─────────────────────────────────────────────
+  const trainingDetails: string[] = [];
+  if (todayEntry.training.strengthTraining)
+    trainingDetails.push(`Strength ${todayEntry.training.strengthDuration ?? "?"}min`);
+  if (todayEntry.training.cardio)
+    trainingDetails.push(`Cardio ${todayEntry.training.cardioDuration ?? "?"}min`);
+  if (todayEntry.training.coreWork) trainingDetails.push("Core work");
+  if (todayEntry.training.mobility) trainingDetails.push("Mobility");
+  if (trainingDetails.length === 0) trainingDetails.push("Rest day");
+
+  // ── Nutrition card details ────────────────────────────────────────────
+  const nutritionDetails = [
+    todayEntry.nutrition.calories ? `${todayEntry.nutrition.calories} kcal` : null,
+    todayEntry.nutrition.protein  ? `${todayEntry.nutrition.protein}g protein` : null,
+    todayEntry.nutrition.hydration ? `${todayEntry.nutrition.hydration}oz water` : null,
+  ].filter(Boolean) as string[];
+
+  // ── Labs card details ─────────────────────────────────────────────────
+  const labsScore  = bwAnalysis?.score ?? 0;
+  const labsDetails = bwAnalysis
+    ? [
+        `Latest: ${format(new Date(latestBloodwork!.date + "T12:00:00"), "M/d/yyyy")}`,
+        `${bwAnalysis.markerCount} markers · ${bwAnalysis.recoveryModifier >= 0 ? "+" : ""}${bwAnalysis.recoveryModifier} pts to recovery`,
+      ]
+    : ["No labs uploaded", "Impact: 0 pts"];
+
+  // ── Coach label ───────────────────────────────────────────────────────
+  const modeLabelMap = {
+    hardcore: "HARDCORE COACH",
+    balanced: "BALANCED COACH",
+    recovery: "RECOVERY COACH",
+  };
+  const modeColor = {
+    hardcore: "#EF4444",
+    balanced: "#F59E0B",
+    recovery: "#22C55E",
+  };
+
+  return (
+    <div className="flex flex-col gap-6 animate-fade-in">
+
+      {/* ── Header ──────────────────────────────────────────────────────── */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-xl font-bold text-text-primary">Recovery Engine</h1>
+          <p className="text-xs text-text-muted mt-0.5 uppercase tracking-wider">{today}</p>
+        </div>
+        <Link
+          href="/log"
+          className="flex items-center gap-1.5 text-gold border border-gold/40 rounded-xl px-3 py-2 text-xs font-bold hover:bg-gold/10 transition-colors uppercase tracking-wide"
+        >
+          <PlusCircle size={13} />
+          Update
+        </Link>
+      </div>
+
+      {/* ── Score ring ──────────────────────────────────────────────────── */}
+      <div className="flex justify-center">
+        <RecoveryScoreRing score={displayScore} confidence={confidence} size={240} animated />
+      </div>
+
+      {/* ── Override ────────────────────────────────────────────────────── */}
+      <ScoreOverride
+        date={todayScore.date}
+        calculatedScore={todayScore.calculatedScore}
+        adjustedScore={todayScore.adjustedScore}
+      />
+
+      {/* ── Coach message ───────────────────────────────────────────────── */}
+      <div className="bg-bg-card border border-bg-border rounded-2xl p-4">
+        <div className="flex items-center gap-2 mb-3">
+          <span
+            className="h-2 w-2 rounded-full shrink-0"
+            style={{ backgroundColor: modeColor[coachMode] }}
+          />
+          <span
+            className="text-xs font-bold uppercase tracking-widest"
+            style={{ color: modeColor[coachMode] }}
+          >
+            {modeLabelMap[coachMode]}
+          </span>
+        </div>
+        <p className="text-sm text-text-primary leading-relaxed font-medium">
+          {coachMessage}
+        </p>
+      </div>
+
+      {/* ── Today's Plan ────────────────────────────────────────────────── */}
+      <TodaysPlanCard plan={dailyPlan} details={planDetails} />
+
+      {/* ── Score breakdown ─────────────────────────────────────────────── */}
+      <div>
+        <h2 className="text-xs font-bold text-text-muted uppercase tracking-widest mb-3">
+          Score Breakdown
+        </h2>
+        <div className="grid grid-cols-2 gap-3">
+          <ScoreCard
+            icon={<Moon size={13} />}
+            label="Sleep"
+            score={breakdown.sleep}
+            details={sleepDetails.length ? sleepDetails : ["No data"]}
+          />
+          <ScoreCard
+            icon={<Zap size={13} />}
+            label="Readiness"
+            score={breakdown.hrv}
+            details={readinessDetails.length ? readinessDetails : ["No HRV data"]}
+          />
+          <ScoreCard
+            icon={<Dumbbell size={13} />}
+            label="Training"
+            score={breakdown.training}
+            details={trainingDetails}
+          />
+          <ScoreCard
+            icon={<Utensils size={13} />}
+            label="Nutrition"
+            score={breakdown.nutrition}
+            details={nutritionDetails.length ? nutritionDetails : ["No data"]}
+          />
+          <ScoreCard
+            icon={<FlaskConical size={13} />}
+            label="Labs"
+            score={labsScore}
+            details={labsDetails}
+            fullWidth
+          />
+        </div>
+      </div>
+
+      {/* ── Mood ─────────────────────────────────────────────────────────── */}
+      <MoodPicker value={todayMood} onChange={onMoodChange} />
+
+      {/* ── Training impact ──────────────────────────────────────────────── */}
+      {trainingPlan && (
+        <div className="bg-bg-card border border-bg-border rounded-2xl p-4 flex flex-col gap-2">
+          <div className="flex items-center gap-2 mb-1">
+            <Dumbbell size={13} className="text-text-muted" />
+            <span className="text-xs font-bold text-text-muted uppercase tracking-widest">
+              Training Impact
+            </span>
+          </div>
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex-1">
+              <p className="text-2xs text-text-muted uppercase tracking-wider mb-0.5">Today</p>
+              <p className="text-xs text-text-secondary">{recSummary.today}</p>
+            </div>
+            {todayPlan && (
+              <span
+                className="text-2xs font-bold px-2 py-0.5 rounded-full uppercase tracking-wide shrink-0"
+                style={{
+                  backgroundColor: `${TYPE_COLOR[todayPlan.training_type]}20`,
+                  color: TYPE_COLOR[todayPlan.training_type],
+                }}
+              >
+                {TYPE_LABEL[todayPlan.training_type]}
+              </span>
+            )}
+          </div>
+          <div className="h-px bg-bg-border" />
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex-1">
+              <p className="text-2xs text-text-muted uppercase tracking-wider mb-0.5">Tomorrow</p>
+              <p className="text-xs text-text-secondary">{recSummary.tomorrow}</p>
+            </div>
+            {tomorrowPlan && (
+              <span
+                className="text-2xs font-bold px-2 py-0.5 rounded-full uppercase tracking-wide shrink-0"
+                style={{
+                  backgroundColor: `${TYPE_COLOR[tomorrowPlan.training_type]}20`,
+                  color: TYPE_COLOR[tomorrowPlan.training_type],
+                }}
+              >
+                {TYPE_LABEL[tomorrowPlan.training_type]}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Recovery modalities ─────────────────────────────────────────── */}
+      <div>
+        <div className="flex items-center justify-between mb-1">
+          <h2 className="text-xs font-bold text-text-muted uppercase tracking-widest">
+            Recovery Modalities
+          </h2>
+          <span className="text-xs font-bold text-gold uppercase tracking-wider">
+            Coach Recommended
+          </span>
+        </div>
+        <div className="flex flex-col gap-2">
+          {recommendations.map((rec) => (
+            <ModalityCard key={rec.id} rec={rec} />
+          ))}
+        </div>
+      </div>
+
+      {/* ── Quick links ─────────────────────────────────────────────────── */}
+      <Link
+        href="/trends"
+        className="flex items-center justify-between bg-bg-card border border-bg-border rounded-2xl p-4 hover:border-text-muted/40 transition-colors"
+      >
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-bg-elevated flex items-center justify-center">
+            <TrendingUp size={16} className="text-text-secondary" />
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-text-primary">View Trends</p>
+            <p className="text-xs text-text-muted mt-0.5">30-day history and insights</p>
+          </div>
+        </div>
+        <ChevronRight size={16} className="text-text-muted" />
+      </Link>
+
+      <Link
+        href="/bloodwork"
+        className="flex items-center justify-between bg-bg-card border border-bg-border rounded-2xl p-4 hover:border-text-muted/40 transition-colors"
+      >
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-bg-elevated flex items-center justify-center">
+            <FlaskConical size={16} className="text-text-secondary" />
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-text-primary">
+              {latestBloodwork ? "Blood Lab Results" : "Add Lab Results"}
+            </p>
+            <p className="text-xs text-text-muted mt-0.5">
+              {latestBloodwork
+                ? `Last tested ${format(new Date(latestBloodwork.date + "T12:00:00"), "M/d/yyyy")}`
+                : "Upload blood tests to improve score accuracy"}
+            </p>
+          </div>
+        </div>
+        <ChevronRight size={16} className="text-text-muted" />
+      </Link>
+    </div>
+  );
+}
+
+// ─── Empty state ──────────────────────────────────────────────────────────
+
+function EmptyState({ today }: { today: string }) {
+  return (
+    <div className="flex flex-col gap-6 animate-fade-in">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-xl font-bold text-text-primary">Recovery Engine</h1>
+          <p className="text-xs text-text-muted mt-0.5 uppercase tracking-wider">{today}</p>
+        </div>
+        <Link
+          href="/log"
+          className="flex items-center gap-1.5 text-gold border border-gold/40 rounded-xl px-3 py-2 text-xs font-bold hover:bg-gold/10 transition-colors uppercase tracking-wide"
+        >
+          <PlusCircle size={13} />
+          Update
+        </Link>
+      </div>
+
+      <div className="flex justify-center py-10">
+        <div className="flex flex-col items-center gap-4">
+          <div className="h-52 w-52 rounded-full border-2 border-dashed border-bg-border flex items-center justify-center">
+            <span className="text-6xl font-bold text-text-muted/30">—</span>
+          </div>
+          <p className="text-xs text-text-muted uppercase tracking-widest">No Data Today</p>
+        </div>
+      </div>
+
+      <Link
+        href="/log"
+        className="w-full py-4 rounded-2xl bg-gold text-bg-primary text-sm font-bold uppercase tracking-wider text-center hover:bg-gold-light transition-colors block"
+      >
+        Log Today's Data
+      </Link>
+    </div>
+  );
+}
