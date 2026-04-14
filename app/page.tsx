@@ -1181,7 +1181,7 @@ function DashboardContent({
           </span>
         </div>
         <div className="flex flex-col gap-2">
-          {recommendations.map((rec) => (
+          {recommendations.slice(0, 3).map((rec) => (
             <ModalityCard key={rec.id} rec={rec} />
           ))}
         </div>

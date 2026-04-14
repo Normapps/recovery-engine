@@ -316,10 +316,39 @@ export function unifiedRecoveryEngine(input: UnifiedInput): UnifiedOutput {
   used.add(tissueWork.id);
   const nervousSystem = pickNervousSystem(input, score, used);
 
+  // ── Priority ordering ──────────────────────────────────────────────────────
+  // Each slot gets an urgency score so the most critical action surfaces first.
+  // Higher = more urgent.
+  const circulationUrgency =
+    (input.today_training.type === "game"             ? 4 : 0) +
+    (input.today_training.intensity === "high"        ? 3 : 0) +
+    (input.soreness       === "high"                  ? 1 : 0) +
+    (input.physiology.hrv_trend === "down"            ? 1 : 0);
+
+  const tissueUrgency =
+    (input.injury.active                              ? 4 : 0) +
+    (input.soreness === "high"                        ? 3 : 0) +
+    (input.soreness === "moderate"                    ? 1 : 0);
+
+  const nervousSystemUrgency =
+    (input.physiology.sleep_hours < 6                 ? 4 : 0) +
+    (score < 45                                       ? 3 : 0) +
+    (score < 65                                       ? 1 : 0) +
+    (input.physiology.hrv_trend === "down"            ? 1 : 0) +
+    ((input.psych_score ?? 3) <= 2                    ? 2 : 0);
+
+  const sortedModalities = [
+    { rec: circulation,   urgency: circulationUrgency   },
+    { rec: tissueWork,    urgency: tissueUrgency         },
+    { rec: nervousSystem, urgency: nervousSystemUrgency  },
+  ]
+    .sort((a, b) => b.urgency - a.urgency)
+    .map((x) => x.rec);
+
   /**
    * Build the plain-text recommendation tuple.
    * Format: "<Name> · <duration> — <reason>"
-   * Exactly 3 strings, always, matching the 3 modality slots (circulation · tissue · nervous system).
+   * Exactly 3 strings, always, in priority order.
    */
   function fmt(m: ModalityRecommendation): string {
     const dur = m.duration >= 60 ? `${m.duration / 60}h` : `${m.duration} min`;
@@ -333,8 +362,8 @@ export function unifiedRecoveryEngine(input: UnifiedInput): UnifiedOutput {
       today:    todayImpactText(input.today_training, todayDelta),
       tomorrow: tomorrowImpactText(input.tomorrow_training, tomorrowDelta),
     },
-    recommended_modalities: [circulation, tissueWork, nervousSystem],
-    recommendations: [fmt(circulation), fmt(tissueWork), fmt(nervousSystem)],
+    recommended_modalities: sortedModalities,
+    recommendations: [fmt(sortedModalities[0]), fmt(sortedModalities[1]), fmt(sortedModalities[2])],
   };
 }
 
