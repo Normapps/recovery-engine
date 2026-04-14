@@ -16,15 +16,14 @@ import {
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
-type TimeRange = "7d" | "30d" | "6m" | "1y" | "3y" | "5y";
+type TimeRange = "7d" | "30d" | "90d" | "6m" | "1y";
 
 const RANGE_CONFIG: Record<TimeRange, { days: number; label: string; tickFormat: string }> = {
-  "7d":  { days: 7,    label: "7 Days",   tickFormat: "EEE" },
-  "30d": { days: 30,   label: "30 Days",  tickFormat: "MMM d" },
-  "6m":  { days: 182,  label: "6 Months", tickFormat: "MMM" },
-  "1y":  { days: 365,  label: "1 Year",   tickFormat: "MMM yy" },
-  "3y":  { days: 1095, label: "3 Years",  tickFormat: "MMM yy" },
-  "5y":  { days: 1825, label: "5 Years",  tickFormat: "yyyy" },
+  "7d":  { days: 7,   label: "7 Days",   tickFormat: "EEE"    },
+  "30d": { days: 30,  label: "30 Days",  tickFormat: "MMM d"  },
+  "90d": { days: 90,  label: "90 Days",  tickFormat: "MMM d"  },
+  "6m":  { days: 182, label: "6 Months", tickFormat: "MMM"    },
+  "1y":  { days: 365, label: "1 Year",   tickFormat: "MMM yy" },
 };
 
 // ─── Sub-components ────────────────────────────────────────────────────────
@@ -268,80 +267,169 @@ function BiomarkerChartContent({
   );
 }
 
+// ─── Chart row type ────────────────────────────────────────────────────────
+
+interface ChartRow {
+  date:        string;
+  score:       number | null;
+  calculated:  number | null;
+  hrv:         number | null;
+  rhr:         number | null;
+  sleep:       number | null;
+  protein:     number | null;
+  bodyBattery: number | null;
+  // Index signature required by TrendChart's DataPoint type
+  [key: string]: number | string | null | undefined;
+}
+
+// ─── Build chart rows from Supabase rows (no synthetic values) ─────────────
+
+function buildChartDataFromSupabase(
+  scores:  { date: string; calculated_score: number; adjusted_score: number | null }[],
+  entries: { date: string; hrv: number | null; resting_hr: number | null; sleep_duration: number | null; protein_g: number | null; body_battery: number | null }[],
+  days:    number,
+): ChartRow[] {
+  const scoreMap  = new Map(scores.map((r)  => [r.date,  r]));
+  const entryMap  = new Map(entries.map((r) => [r.date,  r]));
+  const now       = new Date();
+  const rows: ChartRow[] = [];
+
+  for (let i = days - 1; i >= 0; i--) {
+    const key   = format(subDays(now, i), "yyyy-MM-dd");
+    const score = scoreMap.get(key);
+    const entry = entryMap.get(key);
+    if (!score && !entry) continue;          // no data for this day — skip (no fill)
+    rows.push({
+      date:        key,
+      score:       score ? (score.adjusted_score ?? score.calculated_score) : null,
+      calculated:  score?.calculated_score ?? null,
+      hrv:         entry?.hrv         ?? null,
+      rhr:         entry?.resting_hr  ?? null,
+      sleep:       entry?.sleep_duration ?? null,
+      protein:     entry?.protein_g   ?? null,
+      bodyBattery: entry?.body_battery ?? null,
+    });
+  }
+  return rows;
+}
+
+// ─── Build chart rows from localStorage store (fallback) ──────────────────
+
+function buildChartDataFromStore(
+  scores:  Record<string, { adjustedScore?: number | null; calculatedScore: number }>,
+  entries: Record<string, { sleep?: { hrv?: number | null; restingHR?: number | null; duration?: number | null; bodyBattery?: number | null }; nutrition?: { protein?: number | null } }>,
+  days:    number,
+): ChartRow[] {
+  const now  = new Date();
+  const rows: ChartRow[] = [];
+
+  for (let i = days - 1; i >= 0; i--) {
+    const key   = format(subDays(now, i), "yyyy-MM-dd");
+    const score = scores[key];
+    const entry = entries[key];
+    if (!score && !entry) continue;
+    rows.push({
+      date:        key,
+      score:       score ? (score.adjustedScore ?? score.calculatedScore) : null,
+      calculated:  score?.calculatedScore ?? null,
+      hrv:         entry?.sleep?.hrv         ?? null,
+      rhr:         entry?.sleep?.restingHR   ?? null,
+      sleep:       entry?.sleep?.duration    ?? null,
+      protein:     entry?.nutrition?.protein ?? null,
+      bodyBattery: entry?.sleep?.bodyBattery ?? null,
+    });
+  }
+  return rows;
+}
+
 // ─── Main page ─────────────────────────────────────────────────────────────
 
 export default function TrendsPage() {
-  const [range, setRange] = useState<TimeRange>("30d");
+  const [range, setRange]           = useState<TimeRange>("30d");
   const [showHRVOverlay, setShowHRVOverlay] = useState(false);
-  const [mounted, setMounted] = useState(false);
+  const [mounted, setMounted]       = useState(false);
+  const [dataSource, setDataSource] = useState<"supabase" | "local">("local");
+  const [supabaseRows, setSupabaseRows] = useState<{
+    scores:  Parameters<typeof buildChartDataFromSupabase>[0];
+    entries: Parameters<typeof buildChartDataFromSupabase>[1];
+  } | null>(null);
+
+  // LocalStorage fallback data
+  const storeScores   = useStore((s) => s.scores);
+  const storeEntries  = useStore((s) => s.entries);
+  const bloodwork     = useStore((s) => s.bloodwork);
+  const days          = RANGE_CONFIG[range].days;
+
+  // ── Mount guard (prevents hydration mismatch) ───────────────────────
   useEffect(() => { setMounted(true); }, []);
 
-  const scores = useStore((s) => s.scores);
-  const entries = useStore((s) => s.entries);
-  const bloodwork = useStore((s) => s.bloodwork);
-  const days = RANGE_CONFIG[range].days;
-
-  // ── Build time-series ───────────────────────────────────────────────
-  const chartData = useMemo(() => {
-    const rows = [];
-    const now = new Date();
-    for (let i = days - 1; i >= 0; i--) {
-      const d = subDays(now, i);
-      const key = format(d, "yyyy-MM-dd");
-      const score = scores[key];
-      const entry = entries[key];
-      if (score || entry) {
-        const rawScore = score ? (score.adjustedScore ?? score.calculatedScore) : null;
-        rows.push({
-          date: key,
-          score: rawScore,
-          calculated: score?.calculatedScore ?? null,
-          hrv: entry?.sleep?.hrv ?? null,
-          rhr: entry?.sleep?.restingHR ?? null,
-          sleep: entry?.sleep?.duration ?? null,
-          protein: entry?.nutrition?.protein ?? null,
-          bodyBattery: entry?.sleep?.bodyBattery ?? null,
-        });
+  // ── Fetch from Supabase API on mount and when range changes ─────────
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const res  = await fetch(`/api/trends?range=${range}`);
+        const json = await res.json() as {
+          source:  string;
+          scores:  Parameters<typeof buildChartDataFromSupabase>[0];
+          entries: Parameters<typeof buildChartDataFromSupabase>[1];
+        };
+        if (cancelled) return;
+        if (json.source === "supabase" && (json.scores.length > 0 || json.entries.length > 0)) {
+          setSupabaseRows({ scores: json.scores, entries: json.entries });
+          setDataSource("supabase");
+        } else {
+          // Supabase not configured or no data — use localStorage
+          setSupabaseRows(null);
+          setDataSource("local");
+        }
+      } catch {
+        if (!cancelled) { setSupabaseRows(null); setDataSource("local"); }
       }
     }
-    return rows;
-  }, [scores, entries, days]);
+    load();
+    return () => { cancelled = true; };
+  }, [range]);
+
+  // ── Build chart data — Supabase preferred, localStorage fallback ────
+  const chartData = useMemo<ChartRow[]>(() => {
+    if (supabaseRows) {
+      return buildChartDataFromSupabase(supabaseRows.scores, supabaseRows.entries, days);
+    }
+    return buildChartDataFromStore(storeScores, storeEntries, days);
+  }, [supabaseRows, storeScores, storeEntries, days]);
 
   // ── Rolling averages ────────────────────────────────────────────────
   const scoreValues = chartData.map((d) => d.score);
-  const hrvValues = chartData.map((d) => d.hrv);
-  const rhrValues = chartData.map((d) => d.rhr);
+  const hrvValues   = chartData.map((d) => d.hrv);
+  const rhrValues   = chartData.map((d) => d.rhr);
   const sleepValues = chartData.map((d) => d.sleep);
 
-  const scoreRolling7 = rollingAverage(scoreValues, 7);
-  const hrvRolling7 = rollingAverage(hrvValues, 7);
+  const scoreRolling7  = rollingAverage(scoreValues, 7);
+  const hrvRolling7    = rollingAverage(hrvValues,   7);
 
   const chartDataWithRolling = chartData.map((d, i) => ({
     ...d,
     scoreRolling: scoreRolling7[i],
-    hrvRolling: hrvRolling7[i],
+    hrvRolling:   hrvRolling7[i],
   }));
 
-  // ── Trend summaries ─────────────────────────────────────────────────
+  // ── Trend summaries (simple deltas: first half vs second half) ──────
   const scoreTrend = useMemo(() => computeTrendSummary(scoreValues), [scoreValues]);
-  const hrvTrend = useMemo(() => computeTrendSummary(hrvValues), [hrvValues]);
-  const rhrTrend = useMemo(() => computeTrendSummary(rhrValues), [rhrValues]);
+  const hrvTrend   = useMemo(() => computeTrendSummary(hrvValues),   [hrvValues]);
+  const rhrTrend   = useMemo(() => computeTrendSummary(rhrValues),   [rhrValues]);
   const sleepTrend = useMemo(() => computeTrendSummary(sleepValues), [sleepValues]);
 
   // ── Pattern insights ────────────────────────────────────────────────
   const insightPoints: DailyPoint[] = chartData.map((d) => ({
-    date: d.date,
-    score: d.score,
-    hrv: d.hrv,
-    rhr: d.rhr,
-    sleep: d.sleep,
+    date: d.date, score: d.score, hrv: d.hrv, rhr: d.rhr, sleep: d.sleep,
   }));
   const insights = useMemo(() => generateInsights(insightPoints), [insightPoints]);
 
   // ── Distribution ────────────────────────────────────────────────────
   const present = scoreValues.filter((v): v is number => v !== null);
-  const low = present.filter((s) => s < 41).length;
-  const mid = present.filter((s) => s >= 41 && s < 71).length;
+  const low  = present.filter((s) => s < 41).length;
+  const mid  = present.filter((s) => s >= 41 && s < 71).length;
   const high = present.filter((s) => s >= 71).length;
 
   // ── CSV export ──────────────────────────────────────────────────────
@@ -380,7 +468,16 @@ export default function TrendsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold text-text-primary">Trends</h1>
-          <p className="text-xs text-text-muted mt-0.5">{RANGE_CONFIG[range].label} · {present.length} data points</p>
+          <div className="flex items-center gap-2 mt-0.5">
+            <p className="text-xs text-text-muted">{RANGE_CONFIG[range].label} · {present.length} data points</p>
+            <span className={`text-2xs font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full ${
+              dataSource === "supabase"
+                ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                : "bg-bg-elevated text-text-muted border border-bg-border"
+            }`}>
+              {dataSource === "supabase" ? "Synced" : "Local"}
+            </span>
+          </div>
         </div>
         <button
           onClick={exportCSV}
