@@ -81,6 +81,11 @@ import {
   interpretFromBreakdown,
   type InterpretationOutput,
 } from "./interpretation-engine";
+import {
+  selectModalities,
+  type ModalitySelectionInput,
+  type ModalitySelectionOutput,
+} from "./modality-selection-engine";
 
 // ─── Readiness score ──────────────────────────────────────────────────────────
 
@@ -300,6 +305,22 @@ export interface ScoringPipelineOutput {
    * logged yesterday (neutral — no penalty for missing data).
    */
   compliance: ComplianceResult;
+
+  /**
+   * Contextual modality selection — Stage 9.
+   *
+   * Produced by selectModalities() in lib/modality-selection-engine.ts.
+   *
+   *   primary    — the single most important modality for today's context
+   *   supporting — 1–2 complementary modalities from different focus categories
+   *   meta       — classification labels (primary_focus, recovery_state, etc.)
+   *
+   * IDs in primary and supporting will never appear in previousModalities
+   * (the no-repeat guarantee).  Callers that render modality cards should
+   * prefer this output over the unifiedRecoveryEngine recommendations when
+   * they need the structured primary/supporting split.
+   */
+  modality_selection: ModalitySelectionOutput;
 }
 
 // ─── Dashboard readiness helper (exported) ───────────────────────────────────
@@ -457,17 +478,21 @@ function deriveSessionLoadAU(
  * @param todayPlan      Planned training for today  (Stage 4 & 5 context)
  * @param tomorrowPlan   Planned training for tomorrow (Stage 4 & 5 context)
  * @param moodRating     Optional 1–5 mood rating from moodLog (null = unknown → neutral)
- * @param yesterdayTasks Yesterday's plan-task checklist for compliance calculation.
- *                       Pass an empty array or omit to treat as neutral (modifier = 0).
+ * @param yesterdayTasks       Yesterday's plan-task checklist for compliance calculation.
+ *                             Pass an empty array or omit to treat as neutral (modifier = 0).
+ * @param previousModalities   IDs of modalities used in recent sessions (most-recent first).
+ *                             Passed to selectModalities() to enforce the no-repeat guarantee.
+ *                             Pass an empty array or omit to allow any modality.
  */
 export function runScoringPipeline(
-  entry:           DailyEntry,
-  history:         DailyEntry[]           = [],
-  bwPanel?:        BloodworkPanel | null,
-  todayPlan?:      TrainingDay | null,
-  tomorrowPlan?:   TrainingDay | null,
-  moodRating?:     number | null,
-  yesterdayTasks?: ComplianceTaskInput[],
+  entry:                DailyEntry,
+  history:              DailyEntry[]           = [],
+  bwPanel?:             BloodworkPanel | null,
+  todayPlan?:           TrainingDay | null,
+  tomorrowPlan?:        TrainingDay | null,
+  moodRating?:          number | null,
+  yesterdayTasks?:      ComplianceTaskInput[],
+  previousModalities?:  string[],
 ): ScoringPipelineOutput {
 
   // ── Stage 2: Recovery State ──────────────────────────────────────────────
@@ -624,6 +649,31 @@ export function runScoringPipeline(
     readiness_score_final >= 70 ? "ready"     :
     readiness_score_final >= 50 ? "limited"   : "not_ready";
 
+  // ── Stage 9: Dynamic modality selection ──────────────────────────────────
+  //
+  // Runs after all score adjustments (including compliance) so the selection
+  // reflects the true end-state of the athlete's readiness.
+  //
+  // Soreness: treat unifiedInput.soreness as boolean — any level above "low"
+  //   counts as a positive soreness signal for the selection engine.
+  //
+  // Fatigue: derived from the HRV trend computed in Stage 7 — "down" means
+  //   the autonomic nervous system is under stress, which is the primary
+  //   physiological correlate of fatigue in this pipeline.
+  //
+  // Load: pass load_today_score (0–100) directly — matches the engine's
+  //   expected normalised 0–100 range.
+  const selectionInput: ModalitySelectionInput = {
+    recovery_score:      recovery_score_final,
+    readiness_score:     readiness_score_final,
+    load_today:          load_today_score,
+    soreness:            unifiedInput.soreness !== "low",
+    fatigue:             hrv_trend === "down",
+    injury:              false,  // // BACKEND TODO: thread injury store when available
+    previous_modalities: previousModalities ?? [],
+  };
+  const modality_selection = selectModalities(selectionInput);
+
   return {
     recovery_score:  recovery_score_final,
     zone:            zone_final,
@@ -634,8 +684,9 @@ export function runScoringPipeline(
       injury_impact,
     },
     interpretation,
-    readiness_score: readiness_score_final,
-    readiness_zone:  readiness_zone_final,
+    readiness_score:    readiness_score_final,
+    readiness_zone:     readiness_zone_final,
     compliance,
+    modality_selection,
   };
 }
