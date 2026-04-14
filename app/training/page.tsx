@@ -227,7 +227,8 @@ function PlanUploader({
   const [fileName, setFileName]       = useState<string>("");
   const inputRef                      = useRef<HTMLInputElement>(null);
 
-  async function processFile(file: File) {
+  // ── Shared upload function ─────────────────────────────────────────────────
+  async function uploadFile(file: File) {
     const name = file.name.toLowerCase();
     if (!name.endsWith(".pdf") && !name.endsWith(".csv")) {
       setErrorMsg("Only PDF and CSV files are supported.");
@@ -265,25 +266,31 @@ function PlanUploader({
     }
   }
 
-  function handleDrop(e: React.DragEvent) {
-    e.preventDefault();
-    setUploadState("idle");
-    const file = e.dataTransfer.files[0];
-    if (file) processFile(file);
-  }
-
+  // ── Drag-and-drop handlers ─────────────────────────────────────────────────
   function handleDragOver(e: React.DragEvent) {
     e.preventDefault();
     setUploadState("dragging");
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setUploadState("idle");
+
+    const file = e.dataTransfer.files[0];
+    console.log("FILE DROPPED:", file);
+
+    if (!file) return;
+    uploadFile(file);
   }
 
   function handleDragLeave() {
     setUploadState("idle");
   }
 
+  // ── Click / input fallback ─────────────────────────────────────────────────
   function handleFileInput(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
-    if (file) processFile(file);
+    if (file) uploadFile(file);
   }
 
   const isProcessing = uploadState === "processing";
