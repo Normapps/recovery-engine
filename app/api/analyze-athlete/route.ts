@@ -3,14 +3,13 @@
  *
  * Backend-only pipeline:
  *   1. Fetch athlete record from Supabase
- *   2. Build sport-aware system prompt + structured user prompt
+ *   2. Build sport-aware system prompt + structured metrics prompt
  *   3. Send to Claude (model: claude-opus-4-6)
- *   4. Parse recovery score (0–100) + 3 recommendations from response
+ *   4. Parse full analysis result (score, insight, breakdown, recommendations, readiness)
  *   5. Save result to Supabase recovery_scores table
  *   6. Return final result to caller
  *
  * NEVER called from the browser directly — API key stays server-side.
- * Use from server components, other API routes, or cron jobs.
  */
 
 export const runtime = "nodejs";
@@ -22,194 +21,220 @@ import { supabaseClient }           from "@/lib/supabaseClient";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface Recommendation {
-  id:       string;
-  name:     string;
-  duration: number;
-  reason:   string;
+interface ScoreBreakdown {
+  sleep:         number;  // 0–100
+  hrv:           number;  // 0–100
+  training_load: number;  // 0–100
+  nutrition:     number;  // 0–100
 }
 
 interface ClaudeAnalysisResult {
-  score:           number;
-  insight:         string;
-  recommendations: Recommendation[];
+  score:            number;
+  insight:          string;
+  recommendations:  string[];
+  breakdown:        ScoreBreakdown;
+  readiness_level:  "low" | "moderate" | "high";
+  limiting_factor:  string;
 }
 
 interface PipelineResult {
-  user_id:         string;
-  date:            string;
-  score:           number;
-  insight:         string;
-  recommendations: Recommendation[];
-  score_record_id: string;
+  user_id:          string;
+  date:             string;
+  score:            number;
+  insight:          string;
+  recommendations:  string[];
+  breakdown:        ScoreBreakdown;
+  readiness_level:  "low" | "moderate" | "high";
+  limiting_factor:  string;
+  score_record_id:  string;
 }
 
-// ─── Athlete context builder ──────────────────────────────────────────────────
+// ─── System prompt ────────────────────────────────────────────────────────────
 
-/**
- * Assembles the structured user-turn prompt from all available athlete data.
- * Everything the model needs to personalise output lives here.
- */
-function buildAthletePrompt(
+function buildSystemPrompt(): string {
+  return `You are an elite sports performance coach, data scientist, and recovery specialist.
+
+Your job is to analyze athlete data and produce a Recovery Score (0–100) with clear, actionable recommendations.
+
+ANALYSIS RULES
+
+1. Evaluate all available data:
+   - Sleep (hours + quality rating)
+   - HRV (value + trend vs baseline)
+   - Resting heart rate
+   - Training load (today and recent history)
+   - Nutrition (calories, protein, hydration)
+   - Subjective feel (soreness rating 1–5, energy level 1–5)
+   - Body battery (if available)
+
+2. Adjust based on athlete profile:
+   - Sport defines movement demands and recovery priorities:
+     · Team sports (soccer, basketball, football, volleyball, hockey): lower-body bias, CNS fatigue from agility/acceleration, game-day protection
+     · Endurance (marathon, triathlon, ironman, cycling, swimming, rowing, trail running): eccentric leg damage, glycogen depletion, aerobic base sensitivity
+     · Strength (powerlifting, strength training): mechanical muscle damage, joint stress, CNS load from heavy compound lifts
+     · Hybrid (CrossFit, MMA, rugby, rock climbing): total-body metabolic + structural stress combined
+   - Goal priority defines TODAY'S decision bias:
+     · Performance → aggressive recovery, maximise training adaptation
+     · Recovery → conservative, protect the body over performance gains
+     · Longevity → sustainable habits, avoid overreach at all costs
+   - High training frequency (>10 hrs/week) → reduce load tolerance threshold
+   - Active injury → lower score ceiling, prioritise targeted tissue and rest protocols
+   - Race week (≤7 days to event): prioritise readiness, no new stress, maximum sleep
+   - Taper period (8–21 days to event): reduce volume, sharpen intensity, protect HRV
+
+3. Identify the single biggest limiting factor:
+   - Sleep (duration or quality below threshold)
+   - HRV (suppressed or declining trend)
+   - Training load (accumulated fatigue, overreaching)
+   - Nutrition (underfuelling, protein deficit, dehydration)
+   - Subjective feel (high soreness, depleted energy)
+   - Injury (acute or chronic)
+
+4. Keep logic realistic:
+   - Do NOT give scores above 85 unless sleep ≥7.5h, HRV is solid, load is appropriate, and nutrition is adequate
+   - Do NOT give generic advice — tie every recommendation to the athlete's specific data
+   - Do NOT overreact to single-data-point fluctuations
+   - If data is missing, note it in the insight and score conservatively
+
+SCORING GUIDELINES
+  85–100 → high readiness: athlete is primed, training can be pushed
+  70–84  → moderate readiness: train with purpose, manage load
+  < 70   → low readiness: recovery takes priority over performance
+
+RECOMMENDATION FORMAT — MARKETABILITY ENGINE
+Every recommendation MUST follow: [What is happening to your body] → [The one action] → [What happens tomorrow]
+Example: "Your legs are inflamed after yesterday's high-load session — spend 25 min in compression boots tonight — you'll wake up noticeably fresher for tomorrow's training."
+Keep each recommendation under 40 words. Specific, not generic.
+
+OUTPUT FORMAT
+Return ONLY valid JSON. No markdown fences, no text outside the JSON object:
+{
+  "score": <integer 0–100>,
+  "insight": "<1–2 sentence plain-English summary naming the top scoring driver AND top limiting factor>",
+  "recommendations": [
+    "<Marketability Engine recommendation 1>",
+    "<Marketability Engine recommendation 2>",
+    "<Marketability Engine recommendation 3>"
+  ],
+  "breakdown": {
+    "sleep":         <0–100>,
+    "hrv":           <0–100>,
+    "training_load": <0–100>,
+    "nutrition":     <0–100>
+  },
+  "readiness_level": "<low | moderate | high>",
+  "limiting_factor": "<single biggest reason score is not higher>"
+}`;
+}
+
+// ─── Athlete profile section ──────────────────────────────────────────────────
+
+function buildProfileBlock(
   athleteData: Record<string, unknown>,
-  dailyEntry:  Record<string, unknown> | null,
   date:        string,
 ): string {
   const profile  = (athleteData.performance_profile ?? {}) as Record<string, unknown>;
-  const sport    = (profile.primaryGoal  as string) ?? "General Fitness";
-  const position = (profile.position    as string) ?? null;
-  const goal     = (profile.priority    as string) ?? "Performance";
-  const focus    = (profile.trainingFocus as string) ?? "Hybrid";
+  const sport    = (profile.primaryGoal    as string) ?? "General Fitness";
+  const position = (profile.position       as string) ?? null;
+  const priority = (profile.priority       as string) ?? "Performance";
+  const focus    = (profile.trainingFocus  as string) ?? "Hybrid";
   const weeklyHours   = profile.weeklyHours    as number | null;
   const bodyWeightLbs = profile.bodyWeightLbs  as number | null;
   const eventDate     = profile.eventDate      as string | null;
 
-  // Days until next race / game
-  let eventCountdown = "";
+  // Event countdown
+  let eventLine = "";
   if (eventDate) {
-    const days = Math.ceil((new Date(eventDate + "T12:00:00").getTime() - new Date(date + "T12:00:00").getTime()) / 86400000);
-    if (days > 0) {
-      eventCountdown =
-        days <= 7  ? `RACE WEEK: ${days} days until event — taper and protect readiness at all costs.` :
-        days <= 21 ? `TAPER PERIOD: ${days} days until event — reduce volume, sharpen intensity, prioritise sleep.` :
-        `Next event: ${days} days out (${eventDate}).`;
-    }
+    const days = Math.ceil(
+      (new Date(eventDate + "T12:00:00").getTime() - new Date(date + "T12:00:00").getTime()) / 86400000
+    );
+    eventLine =
+      days <= 0  ? `Event date: ${eventDate} (past)` :
+      days <= 7  ? `RACE WEEK — ${days} days to event (${eventDate})` :
+      days <= 21 ? `TAPER PERIOD — ${days} days to event (${eventDate})` :
+                   `Next event: ${eventDate} (${days} days out)`;
   }
 
-  // Format daily entry fields that matter most
-  const sleep        = (dailyEntry?.sleep_hours       as number | null) ?? (dailyEntry?.sleep as Record<string, unknown>)?.duration ?? null;
-  const hrv          = (dailyEntry?.hrv               as number | null) ?? (dailyEntry?.sleep as Record<string, unknown>)?.hrv ?? null;
-  const rhr          = (dailyEntry?.resting_hr        as number | null) ?? (dailyEntry?.sleep as Record<string, unknown>)?.restingHR ?? null;
-  const sleepQuality = (dailyEntry?.sleep_quality     as number | null) ?? (dailyEntry?.sleep as Record<string, unknown>)?.qualityRating ?? null;
-  const protein      = (dailyEntry?.protein_g         as number | null) ?? (dailyEntry?.nutrition as Record<string, unknown>)?.protein ?? null;
-  const calories     = (dailyEntry?.calories          as number | null) ?? (dailyEntry?.nutrition as Record<string, unknown>)?.calories ?? null;
-  const hydration    = (dailyEntry?.hydration_oz      as number | null) ?? (dailyEntry?.nutrition as Record<string, unknown>)?.hydration ?? null;
-  const soreness     = (dailyEntry?.soreness          as number | null);
-  const energyLevel  = (dailyEntry?.energyLevel       as number | null) ?? (dailyEntry?.energy_level as number | null);
-  const bodyBattery  = (dailyEntry?.body_battery      as number | null) ?? (dailyEntry?.sleep as Record<string, unknown>)?.bodyBattery ?? null;
+  const lines = [
+    `Sport:          ${sport}${position ? ` · ${position}` : ""}`,
+    `Training focus: ${focus}`,
+    `Goal priority:  ${priority}`,
+    weeklyHours    ? `Weekly volume:  ${weeklyHours} hrs/week` : null,
+    bodyWeightLbs  ? `Body weight:    ${bodyWeightLbs} lbs`    : null,
+    eventLine      ? eventLine                                  : null,
+  ].filter(Boolean).join("\n  ");
 
-  const SORENESS_LABEL: Record<number, string> = { 1:"None (1/5)", 2:"Mild (2/5)", 3:"Moderate (3/5)", 4:"Significant (4/5)", 5:"Severe (5/5)" };
-  const ENERGY_LABEL:   Record<number, string> = { 1:"Depleted (1/5)", 2:"Low (2/5)", 3:"Moderate (3/5)", 4:"Good (4/5)", 5:"Excellent (5/5)" };
-
-  const lines: string[] = [
-    `ANALYSIS DATE: ${date}`,
-    ``,
-    `ATHLETE PROFILE`,
-    `  Sport:          ${sport}${position ? ` · ${position}` : ""}`,
-    `  Training focus: ${focus}`,
-    `  Goal priority:  ${goal}`,
-    weeklyHours    ? `  Weekly volume:  ${weeklyHours} hrs/week` : "",
-    bodyWeightLbs  ? `  Body weight:    ${bodyWeightLbs} lbs` : "",
-    eventCountdown ? `  ${eventCountdown}` : "",
-    ``,
-    `TODAY'S PHYSIOLOGICAL DATA`,
-    sleep        != null ? `  Sleep:          ${sleep}h` : "  Sleep:          not logged",
-    sleepQuality != null ? `  Sleep quality:  ${sleepQuality}/5` : "",
-    hrv          != null ? `  HRV:            ${hrv} ms` : "  HRV:            not logged",
-    rhr          != null ? `  Resting HR:     ${rhr} bpm` : "",
-    bodyBattery  != null ? `  Body battery:   ${bodyBattery}/100` : "",
-    ``,
-    `SUBJECTIVE FEEL`,
-    soreness    != null ? `  Muscle soreness: ${SORENESS_LABEL[soreness]}` : "  Muscle soreness: not logged",
-    energyLevel != null ? `  Energy level:    ${ENERGY_LABEL[energyLevel]}` : "  Energy level:    not logged",
-    ``,
-    `NUTRITION`,
-    calories   != null ? `  Calories:   ${calories} kcal` : "  Calories:   not logged",
-    protein    != null ? `  Protein:    ${protein}g` : "  Protein:    not logged",
-    hydration  != null ? `  Hydration:  ${hydration} oz` : "  Hydration:  not logged",
-  ].filter(l => l !== "");
-
-  // Add training data if present
-  const training = dailyEntry?.training as Record<string, unknown> | null;
-  if (training) {
-    lines.push("", "TRAINING LOAD");
-    if (training.strengthTraining) lines.push(`  Strength training: ${training.strengthDuration ?? "?"}min`);
-    if (training.cardio)           lines.push(`  Cardio:            ${training.cardioDuration ?? "?"}min`);
-    if (training.coreWork)         lines.push(`  Core work:         yes`);
-    if (training.mobility)         lines.push(`  Mobility:          yes`);
-  }
-
-  // Add recovery modalities if present
-  const recovery = dailyEntry?.recovery as Record<string, unknown> | null;
-  if (recovery) {
-    const modalityList = Object.entries(recovery)
-      .filter(([, v]) => v === true)
-      .map(([k]) => k.replace(/([A-Z])/g, " $1").toLowerCase().trim())
-      .join(", ");
-    if (modalityList) lines.push("", `RECOVERY COMPLETED: ${modalityList}`);
-  }
-
-  return lines.join("\n");
+  return `ATHLETE PROFILE\n  ${lines}`;
 }
 
-// ─── System prompt builder ────────────────────────────────────────────────────
+// ─── Daily metrics section ────────────────────────────────────────────────────
 
-/**
- * Builds the Claude system prompt.
- * Embeds all static reasoning rules here so the user turn stays factual.
- */
-function buildSystemPrompt(): string {
-  return `You are an elite sports recovery scientist and performance coach.
+function buildMetricsBlock(
+  dailyEntry: Record<string, unknown> | null,
+): string {
+  if (!dailyEntry) {
+    return "DAILY METRICS\n  No entry logged today — score conservatively.";
+  }
 
-YOUR ROLE
-You analyze athlete physiology + training data to produce a daily recovery score and three actionable recovery protocols. Your output directly determines what an athlete does for recovery today.
+  // Unwrap nested or flat shapes from Supabase
+  const sleep    = dailyEntry.sleep    as Record<string, unknown> | null;
+  const nutrition= dailyEntry.nutrition as Record<string, unknown> | null;
+  const training = dailyEntry.training as Record<string, unknown> | null;
+  const recovery = dailyEntry.recovery as Record<string, unknown> | null;
 
-SCORING FRAMEWORK
-Score reflects five weighted dimensions:
-  Sleep & HRV          40%  (sleep hours, quality, HRV, resting HR, body battery)
-  Training load        20%  (session type, duration, intensity, cumulative fatigue)
-  Nutrition            20%  (calorie adequacy, protein, hydration)
-  Subjective feel      15%  (muscle soreness rating, energy level)
-  Recovery modalities   5%  (modalities completed today)
+  const sleepHours   = (dailyEntry.sleep_hours    as number | null) ?? (sleep?.duration      as number | null);
+  const sleepQuality = (dailyEntry.sleep_quality   as number | null) ?? (sleep?.qualityRating as number | null);
+  const hrv          = (dailyEntry.hrv             as number | null) ?? (sleep?.hrv           as number | null);
+  const rhr          = (dailyEntry.resting_hr      as number | null) ?? (sleep?.restingHR     as number | null);
+  const bodyBattery  = (dailyEntry.body_battery    as number | null) ?? (sleep?.bodyBattery   as number | null);
+  const calories     = (dailyEntry.calories        as number | null) ?? (nutrition?.calories  as number | null);
+  const protein      = (dailyEntry.protein_g       as number | null) ?? (nutrition?.protein   as number | null);
+  const hydration    = (dailyEntry.hydration_oz    as number | null) ?? (nutrition?.hydration as number | null);
+  const soreness     = dailyEntry.soreness         as number | null;
+  const energyLevel  = (dailyEntry.energyLevel     as number | null) ?? (dailyEntry.energy_level as number | null);
 
-PERSONALIZATION RULES — YOU MUST APPLY ALL OF THESE
-1. SPORT defines movement demands:
-   - Team sports (soccer, basketball, etc.): lower-body bias, game-day protection, CNS fatigue
-   - Endurance (marathon, triathlon, ironman): aerobic base, eccentric leg damage, glycogen depletion
-   - Strength (powerlifting, weightlifting): mechanical muscle damage, CNS load, joint stress
-   - Hybrid (CrossFit, MMA, rugby): total-body fatigue, metabolic + structural stress combined
+  const SORENESS_LABEL: Record<number, string> = { 1:"None",2:"Mild",3:"Moderate",4:"Significant",5:"Severe" };
+  const ENERGY_LABEL:   Record<number, string> = { 1:"Depleted",2:"Low",3:"Moderate",4:"Good",5:"Excellent" };
 
-2. GOAL PRIORITY defines today's decision bias:
-   - Performance → aggressive recovery to maximise training adaptation
-   - Recovery → conservative; protect the body over performance gains
-   - Longevity → sustainable habits; avoid overreach
+  const sleepLines: string[] = [];
+  if (sleepHours   != null) sleepLines.push(`Duration: ${sleepHours}h`);
+  if (sleepQuality != null) sleepLines.push(`Quality: ${sleepQuality}/5`);
+  if (hrv          != null) sleepLines.push(`HRV: ${hrv} ms`);
+  if (rhr          != null) sleepLines.push(`Resting HR: ${rhr} bpm`);
+  if (bodyBattery  != null) sleepLines.push(`Body battery: ${bodyBattery}/100`);
 
-3. TRAINING LOAD defines fatigue context:
-   - High load + low score = mandatory passive recovery (compression, ice bath, sleep)
-   - High load + high score = active recovery appropriate
-   - Low load (rest/off day) + low score = sleep and nutrition are the levers
+  const feelLines: string[] = [];
+  if (soreness    != null) feelLines.push(`Muscle soreness: ${SORENESS_LABEL[soreness]} (${soreness}/5)`);
+  if (energyLevel != null) feelLines.push(`Energy level: ${ENERGY_LABEL[energyLevel]} (${energyLevel}/5)`);
 
-4. SUBJECTIVE FEEL overrides objective signals when soreness ≥ 4/5 or energy ≤ 2/5:
-   - Soreness ≥ 4: always include a cold/compression circulation protocol
-   - Energy ≤ 2: nervous system is taxed — breathwork + sleep protocol is mandatory
+  const nutritionLines: string[] = [];
+  if (calories  != null) nutritionLines.push(`Calories: ${calories} kcal`);
+  if (protein   != null) nutritionLines.push(`Protein: ${protein}g`);
+  if (hydration != null) nutritionLines.push(`Hydration: ${hydration} oz`);
 
-5. INJURY STATUS: if injury data present, include a targeted tissue work recommendation.
+  const trainingLines: string[] = [];
+  if (training?.strengthTraining) trainingLines.push(`Strength: ${training.strengthDuration ?? "?"}min`);
+  if (training?.cardio)           trainingLines.push(`Cardio: ${training.cardioDuration ?? "?"}min`);
+  if (training?.coreWork)         trainingLines.push("Core work");
+  if (training?.mobility)         trainingLines.push("Mobility");
+  if (trainingLines.length === 0) trainingLines.push("Rest / no training logged");
 
-6. EVENT COUNTDOWN:
-   - Race week (≤7 days): prioritise readiness, zero new stress, maximum sleep
-   - Taper period (8–21 days): reduce volume, sharpen intensity, prioritise sleep quality
+  const modalityList = recovery
+    ? Object.entries(recovery)
+        .filter(([, v]) => v === true)
+        .map(([k]) => k.replace(/([A-Z])/g, " $1").toLowerCase().trim())
+        .join(", ")
+    : "";
 
-RECOMMENDATION FORMAT — MARKETABILITY ENGINE
-Every reason MUST follow: [Body state right now] → [ONE action] → [Tomorrow's benefit]
-Example: "Your CNS is taxed from today's game load — 25 minutes in compression boots right now
-pumps recovery fluid through your legs — you'll start tomorrow's training significantly fresher."
+  const sections: string[] = [
+    sleepLines.length     ? `Sleep\n    ${sleepLines.join(" · ")}`                : "Sleep\n    Not logged",
+    feelLines.length      ? `Subjective feel\n    ${feelLines.join(" · ")}`       : "Subjective feel\n    Not logged",
+    nutritionLines.length ? `Nutrition\n    ${nutritionLines.join(" · ")}`        : "Nutrition\n    Not logged",
+    `Training\n    ${trainingLines.join(", ")}`,
+    modalityList          ? `Recovery completed\n    ${modalityList}`             : "Recovery modalities\n    None logged",
+  ];
 
-Always return exactly 3 recommendations covering:
-  1. CIRCULATION  — blood flow, inflammation, fluid dynamics (compression, ice bath, active recovery, contrast)
-  2. TISSUE WORK  — mechanical repair (foam rolling, myofascial release)
-  3. NERVOUS SYSTEM — CNS and parasympathetic recovery (breathwork, sleep protocol)
-
-OUTPUT FORMAT
-Return ONLY valid JSON — no markdown fences, no prose outside the JSON object:
-{
-  "score": <integer 0–100>,
-  "insight": "<2–3 sentence plain-English explanation that names the top scoring driver AND top limiting factor>",
-  "recommendations": [
-    { "id": "circulation",    "name": "<modality name>", "duration": <minutes>, "reason": "<Marketability Engine reason>" },
-    { "id": "tissue_work",   "name": "<modality name>", "duration": <minutes>, "reason": "<Marketability Engine reason>" },
-    { "id": "nervous_system","name": "<modality name>", "duration": <minutes>, "reason": "<Marketability Engine reason>" }
-  ]
-}`;
+  return `DAILY METRICS\n  ${sections.join("\n\n  ")}`;
 }
 
 // ─── Claude API call ──────────────────────────────────────────────────────────
@@ -220,13 +245,12 @@ async function callClaudeAnalysis(
   date:        string,
 ): Promise<ClaudeAnalysisResult> {
   const apiKey = process.env.ANTHROPIC_API_KEY ?? process.env.CLAUDE_API_KEY ?? "";
+  if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set.");
 
-  if (!apiKey) {
-    throw new Error("ANTHROPIC_API_KEY is not set.");
-  }
+  const profile = buildProfileBlock(athleteData, date);
+  const metrics = buildMetricsBlock(dailyEntry);
 
-  const systemPrompt = buildSystemPrompt();
-  const userPrompt   = buildAthletePrompt(athleteData, dailyEntry, date);
+  const userPrompt = `${profile}\n\n${metrics}`;
 
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -238,7 +262,7 @@ async function callClaudeAnalysis(
     body: JSON.stringify({
       model:      "claude-opus-4-6",
       max_tokens: 1200,
-      system:     systemPrompt,
+      system:     buildSystemPrompt(),
       messages:   [{ role: "user", content: userPrompt }],
     }),
   });
@@ -248,20 +272,22 @@ async function callClaudeAnalysis(
     throw new Error(`Claude API error ${response.status}: ${err}`);
   }
 
-  const raw   = await response.json();
-  const text  = (raw?.content?.[0]?.text ?? "") as string;
+  const raw  = await response.json();
+  const text = (raw?.content?.[0]?.text ?? "") as string;
 
   // Strip markdown fences if present
   const cleaned = text.replace(/```(?:json)?\r?\n?/g, "").replace(/\r?\n?```/g, "").trim();
   const parsed  = JSON.parse(cleaned) as ClaudeAnalysisResult;
 
   // Validate required fields
-  if (typeof parsed.score !== "number" || parsed.score < 0 || parsed.score > 100) {
+  if (typeof parsed.score !== "number" || parsed.score < 0 || parsed.score > 100)
     throw new Error("Claude returned an invalid score.");
-  }
-  if (!Array.isArray(parsed.recommendations) || parsed.recommendations.length < 3) {
+  if (!Array.isArray(parsed.recommendations) || parsed.recommendations.length < 3)
     throw new Error("Claude returned fewer than 3 recommendations.");
-  }
+  if (!parsed.breakdown || typeof parsed.breakdown.sleep !== "number")
+    throw new Error("Claude returned an invalid breakdown.");
+  if (!["low","moderate","high"].includes(parsed.readiness_level))
+    throw new Error("Claude returned an invalid readiness_level.");
 
   return parsed;
 }
@@ -273,14 +299,12 @@ async function fetchTodayEntry(
   date:   string,
 ): Promise<Record<string, unknown> | null> {
   if (!supabaseClient) return null;
-
   const { data } = await supabaseClient
     .from("daily_entries")
     .select("*")
     .eq("user_id", userId)
     .eq("date", date)
     .maybeSingle();
-
   return data ?? null;
 }
 
@@ -288,51 +312,51 @@ async function fetchTodayEntry(
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
-    const body    = await req.json();
-    const userId: string = body.user_id ?? "";
-    const date:   string = body.date    ?? new Date().toISOString().slice(0, 10);
+    const body   = await req.json();
+    const userId = (body.user_id ?? "") as string;
+    const date   = (body.date ?? new Date().toISOString().slice(0, 10)) as string;
 
-    if (!userId) {
+    if (!userId)
       return NextResponse.json({ error: "user_id is required." }, { status: 400 });
-    }
 
-    // ── Step 1: Fetch athlete ────────────────────────────────────────────────
+    // Step 1: Fetch athlete record
     const athleteResult = await getAthlete(userId);
-    if (!athleteResult.success) {
+    if (!athleteResult.success)
       return NextResponse.json({ error: athleteResult.error.message }, { status: 404 });
-    }
 
-    // ── Step 2: Fetch today's daily entry ────────────────────────────────────
+    // Step 2: Fetch today's entry
     const dailyEntry = await fetchTodayEntry(userId, date);
 
-    // ── Step 3: Send to Claude ───────────────────────────────────────────────
+    // Step 3: Send to Claude
     const analysis = await callClaudeAnalysis(
       athleteResult.data as unknown as Record<string, unknown>,
       dailyEntry,
       date,
     );
 
-    // ── Step 4: Save to Supabase ─────────────────────────────────────────────
+    // Step 4: Save to Supabase
     const saveResult = await insertRecoveryScore({
       user_id:         userId,
       date,
       score:           analysis.score,
-      recommendations: analysis.recommendations,
+      recommendations: analysis.recommendations as unknown as Parameters<typeof insertRecoveryScore>[0]["recommendations"],
       confidence:      dailyEntry ? "High" : "Low",
     });
 
-    if (!saveResult.success) {
+    if (!saveResult.success)
       return NextResponse.json({ error: saveResult.error.message }, { status: 500 });
-    }
 
-    // ── Step 5: Return result ────────────────────────────────────────────────
+    // Step 5: Return full result
     const result: PipelineResult = {
-      user_id:         userId,
+      user_id:          userId,
       date,
-      score:           analysis.score,
-      insight:         analysis.insight,
-      recommendations: analysis.recommendations,
-      score_record_id: saveResult.data.id,
+      score:            analysis.score,
+      insight:          analysis.insight,
+      recommendations:  analysis.recommendations,
+      breakdown:        analysis.breakdown,
+      readiness_level:  analysis.readiness_level,
+      limiting_factor:  analysis.limiting_factor,
+      score_record_id:  saveResult.data.id,
     };
 
     return NextResponse.json({ success: true, data: result });
