@@ -17,11 +17,11 @@ export default function LogPage() {
         </Link>
         <div>
           <h1 className="text-xl font-bold text-text-primary">Daily Log</h1>
-          <p className="text-xs text-text-muted mt-0.5">{today}</p>
+          <p className="text-xs text-text-secondary mt-0.5">{today}</p>
         </div>
       </div>
 
-      <p className="text-xs text-text-muted leading-relaxed">
+      <p className="text-xs text-text-secondary leading-relaxed">
         Enter your data for today. Incomplete entries will be scored with a lower confidence level.
         You can always update this data later.
       </p>

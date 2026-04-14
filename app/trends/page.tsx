@@ -31,13 +31,15 @@ const RANGE_CONFIG: Record<TimeRange, { days: number; label: string; tickFormat:
 
 function TimeRangeSelector({ value, onChange }: { value: TimeRange; onChange: (r: TimeRange) => void }) {
   return (
-    <div className="flex gap-1 bg-bg-card border border-bg-border rounded-xl p-1">
+    <div className="flex gap-1 bg-bg-elevated border border-bg-border rounded-xl p-1">
       {(Object.keys(RANGE_CONFIG) as TimeRange[]).map((r) => (
         <button
           key={r}
           onClick={() => onChange(r)}
-          className={`flex-1 py-1.5 rounded-lg text-2xs font-semibold uppercase tracking-wider transition-all ${
-            value === r ? "bg-gold text-bg-primary shadow-sm" : "text-text-muted hover:text-text-secondary"
+          className={`flex-1 py-2 rounded-lg text-xs font-semibold uppercase tracking-wide transition-all ${
+            value === r
+              ? "bg-gold text-bg-primary shadow-sm"
+              : "text-text-secondary hover:text-text-primary hover:bg-bg-card"
           }`}
         >
           {r}
@@ -91,8 +93,8 @@ function InsightCard({ type, title, body }: { type: "warning" | "positive" | "in
 
 function StatPill({ label, value, unit }: { label: string; value: number | null; unit?: string }) {
   return (
-    <div className="flex flex-col gap-0.5">
-      <span className="text-2xs text-text-muted uppercase tracking-wider">{label}</span>
+    <div className="flex flex-col gap-1">
+      <span className="text-xs text-text-secondary font-medium uppercase tracking-wider">{label}</span>
       <span className="text-base font-bold text-text-primary tabular-nums">
         {value !== null ? value.toFixed(value < 10 ? 1 : 0) : "—"}
         {value !== null && unit && <span className="text-xs text-text-muted font-normal ml-0.5">{unit}</span>}
@@ -129,7 +131,7 @@ function TrendCard({ title, icon, color, children, insight, direction, changePer
           {onOverlay && (
             <button
               onClick={onOverlay}
-              className="text-2xs text-text-muted border border-bg-border rounded-lg px-2 py-1 hover:border-text-muted transition-colors"
+              className="text-xs text-text-secondary border border-bg-border rounded-lg px-2.5 py-1 hover:border-text-muted hover:text-text-primary transition-colors"
             >
               {overlayLabel ?? "Overlay"}
             </button>
@@ -141,7 +143,7 @@ function TrendCard({ title, icon, color, children, insight, direction, changePer
       {insight && (
         <div className="flex items-start gap-2 px-4 pb-4 pt-1 border-t border-bg-border">
           <Lightbulb size={12} className="text-gold mt-0.5 shrink-0" />
-          <p className="text-xs text-text-muted leading-relaxed">{insight}</p>
+          <p className="text-xs text-text-secondary leading-relaxed">{insight}</p>
         </div>
       )}
     </div>
@@ -174,7 +176,7 @@ function BiomarkerTrendPanel({ bloodwork }: { bloodwork: { date: string; panel: 
         >
           <div>
             <span className="text-sm font-semibold text-text-primary">{selected.label}</span>
-            <span className="text-2xs text-text-muted ml-2">{selected.unit} · {selected.category}</span>
+            <span className="text-xs text-text-secondary ml-2">{selected.unit} · {selected.category}</span>
           </div>
           <ChevronDown size={14} className={`text-text-muted transition-transform ${open ? "rotate-180" : ""}`} />
         </button>
@@ -187,7 +189,7 @@ function BiomarkerTrendPanel({ bloodwork }: { bloodwork: { date: string; panel: 
                 className={`w-full text-left flex items-center justify-between px-3 py-2.5 hover:bg-bg-card transition-colors border-b border-bg-border/50 last:border-0 ${selectedKey === ref.key ? "bg-gold/10" : ""}`}
               >
                 <span className="text-sm text-text-primary">{ref.label}</span>
-                <span className="text-2xs text-text-muted">{ref.unit}</span>
+                <span className="text-xs text-text-secondary">{ref.unit}</span>
               </button>
             ))}
           </div>
@@ -259,7 +261,7 @@ function BiomarkerChartContent({
       {insight && (
         <div className="flex items-start gap-2 px-4 pb-4 pt-1 border-t border-bg-border">
           <Lightbulb size={12} className="text-gold mt-0.5 shrink-0" />
-          <p className="text-xs text-text-muted leading-relaxed">{insight}</p>
+          <p className="text-xs text-text-secondary leading-relaxed">{insight}</p>
         </div>
       )}
     </>
@@ -401,7 +403,7 @@ export default function TrendsPage() {
             { label: "Avg Sleep", value: sleepTrend.avg7d, unit: "h" },
           ].map((s) => (
             <div key={s.label} className="bg-bg-card border border-bg-border rounded-xl p-3">
-              <p className="text-2xs text-text-muted uppercase tracking-wider truncate">{s.label}</p>
+              <p className="text-xs font-medium text-text-secondary uppercase tracking-wider truncate">{s.label}</p>
               <p className="text-lg font-bold text-text-primary mt-1 tabular-nums">
                 {s.value !== null ? s.value.toFixed(s.unit === "h" ? 1 : 0) : "—"}
                 {s.value !== null && s.unit && <span className="text-xs text-text-muted font-normal ml-0.5">{s.unit}</span>}
@@ -587,14 +589,14 @@ export default function TrendsPage() {
               { label: "Low    0–40",  count: low,  color: "#EF4444" },
             ].map((bar) => (
               <div key={bar.label} className="flex items-center gap-3">
-                <span className="text-2xs text-text-muted w-24 shrink-0 font-mono">{bar.label}</span>
+                <span className="text-xs text-text-secondary w-24 shrink-0 font-mono">{bar.label}</span>
                 <div className="flex-1 h-2 bg-bg-border rounded-full overflow-hidden">
                   <div
                     className="h-full rounded-full transition-all duration-700"
                     style={{ width: present.length > 0 ? `${(bar.count / present.length) * 100}%` : "0%", backgroundColor: bar.color }}
                   />
                 </div>
-                <span className="text-2xs text-text-secondary w-8 text-right tabular-nums shrink-0">
+                <span className="text-xs text-text-secondary w-8 text-right tabular-nums shrink-0">
                   {present.length > 0 ? Math.round((bar.count / present.length) * 100) : 0}%
                 </span>
               </div>

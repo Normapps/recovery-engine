@@ -146,7 +146,7 @@ export default function BloodworkPage() {
                         >
                           {analysis.recoveryModifier >= 0 ? "+" : ""}{analysis.recoveryModifier} pts
                         </p>
-                        <p className="text-2xs text-text-muted">modifier</p>
+                        <p className="text-xs text-text-secondary">modifier</p>
                       </div>
                     </div>
 
@@ -180,7 +180,7 @@ export default function BloodworkPage() {
                           {analysis.strengths.slice(0, 8).map((m) => (
                             <span
                               key={m.key}
-                              className="text-2xs px-2 py-1 rounded-lg border"
+                              className="text-xs px-2 py-1 rounded-lg border font-medium"
                               style={{
                                 borderColor: "#22C55E40",
                                 color: "#22C55E",
@@ -198,7 +198,7 @@ export default function BloodworkPage() {
 
                     {entry.notes && (
                       <div className="bg-bg-elevated rounded-xl p-3">
-                        <p className="text-2xs text-text-muted uppercase tracking-wider mb-1">Notes</p>
+                        <p className="text-xs text-text-secondary font-medium uppercase tracking-wider mb-1">Notes</p>
                         <p className="text-xs text-text-secondary">{entry.notes}</p>
                       </div>
                     )}
@@ -296,15 +296,15 @@ function MarkerRow({
             {marker.value} {marker.unit}
           </span>
           <span
-            className="text-2xs font-semibold px-1.5 py-0.5 rounded-md"
+            className="text-xs font-semibold px-1.5 py-0.5 rounded-md"
             style={{ backgroundColor: `${color}20`, color }}
           >
             {statusLabel}
           </span>
         </div>
       </div>
-      <p className="text-2xs text-text-muted leading-relaxed">{marker.insight}</p>
-      <p className="text-2xs text-text-muted/60 mt-0.5">Optimal: {marker.optimal}</p>
+      <p className="text-xs text-text-secondary leading-relaxed">{marker.insight}</p>
+      <p className="text-xs text-text-muted mt-0.5">Optimal: {marker.optimal}</p>
     </div>
   );
 }
@@ -330,7 +330,7 @@ function AllMarkersView({
     <div>
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-2 text-xs text-text-muted hover:text-text-secondary transition-colors"
+        className="flex items-center gap-2 text-xs text-text-secondary hover:text-text-primary transition-colors"
       >
         {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
         {open ? "Hide" : "Show"} all {analysis.markerCount} markers
@@ -339,7 +339,7 @@ function AllMarkersView({
         <div className="mt-3 space-y-4">
           {Object.entries(grouped).map(([category, markers]) => (
             <div key={category}>
-              <p className="text-2xs font-semibold text-text-muted uppercase tracking-wider mb-2">
+              <p className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-2">
                 {category}
               </p>
               <div className="grid grid-cols-2 gap-2">
@@ -347,10 +347,10 @@ function AllMarkersView({
                   const color = getStatusColor(m.status);
                   return (
                     <div key={m.key} className="bg-bg-elevated rounded-lg p-2.5">
-                      <p className="text-2xs text-text-muted truncate">{m.label}</p>
+                      <p className="text-xs text-text-secondary truncate">{m.label}</p>
                       <p className="text-xs font-bold mt-0.5 tabular-nums" style={{ color }}>
                         {m.value}{" "}
-                        <span className="text-2xs font-normal text-text-muted">{m.unit}</span>
+                        <span className="text-xs font-normal text-text-muted">{m.unit}</span>
                       </p>
                     </div>
                   );

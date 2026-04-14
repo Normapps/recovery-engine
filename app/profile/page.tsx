@@ -84,7 +84,7 @@ export default function ProfilePage() {
 
       {/* Primary goal */}
       <section>
-        <h2 className="text-xs font-bold text-text-muted uppercase tracking-widest mb-3">
+        <h2 className="text-xs font-bold text-text-secondary uppercase tracking-widest mb-3">
           Primary Goal <span className="text-gold">*</span>
         </h2>
         <div className="grid grid-cols-2 gap-2">
@@ -129,7 +129,7 @@ export default function ProfilePage() {
           className="w-full bg-bg-card border border-bg-border rounded-xl px-4 py-3 text-sm text-text-primary focus:outline-none focus:border-gold/50 transition-colors"
         />
         {eventDate && (
-          <p className="text-2xs text-text-muted mt-1.5 pl-1">
+          <p className="text-xs text-text-secondary mt-1.5 pl-1">
             The AI will factor proximity to your event when calibrating recommendations.
           </p>
         )}
@@ -137,7 +137,7 @@ export default function ProfilePage() {
 
       {/* Training focus */}
       <section>
-        <h2 className="text-xs font-bold text-text-muted uppercase tracking-widest mb-3">
+        <h2 className="text-xs font-bold text-text-secondary uppercase tracking-widest mb-3">
           Training Focus <span className="text-text-muted font-normal normal-case tracking-normal">(optional)</span>
         </h2>
         <div className="flex gap-2">
@@ -162,7 +162,7 @@ export default function ProfilePage() {
 
       {/* Priority */}
       <section>
-        <h2 className="text-xs font-bold text-text-muted uppercase tracking-widest mb-3">
+        <h2 className="text-xs font-bold text-text-secondary uppercase tracking-widest mb-3">
           Current Priority <span className="text-text-muted font-normal normal-case tracking-normal">(optional)</span>
         </h2>
         <div className="flex gap-2">
@@ -190,7 +190,7 @@ export default function ProfilePage() {
       {/* Current profile summary */}
       {saved && (
         <div className="bg-bg-card border border-bg-border rounded-2xl p-4">
-          <p className="text-2xs font-bold text-text-muted uppercase tracking-widest mb-2">
+          <p className="text-xs font-bold text-text-secondary uppercase tracking-widest mb-2">
             Active Profile
           </p>
           <div className="flex flex-col gap-1.5">
