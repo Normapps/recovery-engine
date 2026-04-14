@@ -1,11 +1,42 @@
-// Force Node.js runtime — required for pdf-parse (Buffer APIs, fs access).
+// Force Node.js runtime — required for Buffer APIs and pdfjs-dist.
 // Must NOT run in Edge Runtime.
 export const runtime = "nodejs";
 
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
-import pdf from "pdf-parse";
+import path from "path";
 import type { TrainingDay, WeekDay, TrainingType, IntensityLevel } from "@/lib/types";
+
+// ─── PDF extraction (pdfjs-dist) ──────────────────────────────────────────────
+// pdfjs-dist v5 is ESM-only. webpackIgnore prevents webpack from emitting a
+// broken require() call; Node.js resolves the ESM module natively at runtime.
+async function extractPDFText(buffer: Buffer): Promise<string> {
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  // @ts-ignore
+  const pdfjsLib = await import(
+    /* webpackIgnore: true */
+    "pdfjs-dist/legacy/build/pdf.mjs"
+  );
+
+  const workerPath = path.resolve(
+    process.cwd(),
+    "node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs"
+  );
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `file://${workerPath}`;
+
+  const uint8Array = new Uint8Array(buffer);
+  const pdfDoc     = await pdfjsLib.getDocument({ data: uint8Array }).promise;
+
+  let text = "";
+  for (let i = 1; i <= pdfDoc.numPages; i++) {
+    const page    = await pdfDoc.getPage(i);
+    const content = await page.getTextContent();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const strings = content.items.map((item: any) => item.str ?? "");
+    text += strings.join(" ") + "\n";
+  }
+  return text;
+}
 
 const client = new Anthropic();
 
@@ -103,14 +134,13 @@ export async function POST(req: NextRequest) {
   } else if (fileName.endsWith(".pdf") || mimeType === "application/pdf") {
     try {
       const buffer = Buffer.from(await file.arrayBuffer());
-      const data   = await pdf(buffer);
-      const text   = data.text;
+      const text   = await extractPDFText(buffer);
 
-      console.log("Extracted training text:", text.slice(0, 500));
+      console.log("Extracted text:", text.slice(0, 500));
 
       if (!text.trim()) {
         return NextResponse.json(
-          { error: "Unable to read PDF. Please upload a text-based PDF." },
+          { error: "Unable to extract text from PDF." },
           { status: 422 }
         );
       }
@@ -119,7 +149,7 @@ export async function POST(req: NextRequest) {
     } catch (err) {
       console.error("[parse-training-plan] PDF extraction failed:", err);
       return NextResponse.json(
-        { error: "Unable to read PDF. Please upload a text-based PDF." },
+        { error: "Unable to extract text from PDF." },
         { status: 422 }
       );
     }
