@@ -41,7 +41,7 @@ function NumberInput({
 }) {
   return (
     <div className="flex flex-col gap-1.5">
-      <label className="text-2xs text-text-muted uppercase tracking-wider">{label}</label>
+      <label className="text-xs text-text-secondary font-medium uppercase tracking-wider">{label}</label>
       <div className="flex items-center gap-2 bg-bg-elevated border border-bg-border rounded-xl px-3 py-2.5">
         <input
           type="number"
@@ -77,7 +77,7 @@ function RatingInput({
 }) {
   return (
     <div className="flex flex-col gap-1.5">
-      <label className="text-2xs text-text-muted uppercase tracking-wider">{label}</label>
+      <label className="text-xs text-text-secondary font-medium uppercase tracking-wider">{label}</label>
       <div className="flex gap-2">
         {Array.from({ length: max }, (_, i) => i + 1).map((v) => (
           <button
@@ -122,7 +122,7 @@ function Toggle({
           {label}
         </span>
         {sublabel && (
-          <span className="text-2xs text-text-muted">{sublabel}</span>
+          <span className="text-xs text-text-muted">{sublabel}</span>
         )}
       </div>
       {/* Toggle pill */}
@@ -219,6 +219,7 @@ export default function DailyLogForm() {
       latestBloodwork?.panel ?? null,
       todayPlan,
       tomorrowPlan,
+      trainingPlan?.weeklySchedule,   // Stage 5b: accumulated weekly fatigue
     );
 
     upsertEntry(entry);

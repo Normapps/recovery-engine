@@ -152,7 +152,7 @@ export default function LabUploader({ onSaved }: { onSaved?: () => void }) {
               </div>
               <div className="flex items-center gap-4 mt-1">
                 {["PDF (text or scanned)", "CSV export", "Plain text"].map((label) => (
-                  <span key={label} className="flex items-center gap-1 text-2xs text-text-muted">
+                  <span key={label} className="flex items-center gap-1 text-xs text-text-secondary">
                     <FileText size={10} /> {label}
                   </span>
                 ))}
@@ -338,7 +338,7 @@ export default function LabUploader({ onSaved }: { onSaved?: () => void }) {
 
           {/* Recovery modifier bar */}
           <div className="mt-4 pt-4 border-t border-bg-border">
-            <div className="flex justify-between text-2xs text-text-muted mb-1.5">
+            <div className="flex justify-between text-xs text-text-secondary mb-1.5">
               <span>Recovery score impact</span>
               <span style={{ color: analysis.recoveryModifier >= 0 ? "#22C55E" : "#EF4444" }}>
                 {analysis.recoveryModifier >= 0 ? "+" : ""}{analysis.recoveryModifier} / 12 pts
@@ -463,8 +463,8 @@ function MarkerCard({
           </span>
         </div>
       </div>
-      <p className="text-2xs text-text-muted leading-relaxed">{marker.insight}</p>
-      <p className="text-2xs text-text-muted/50 mt-0.5">Optimal: {marker.optimal}</p>
+      <p className="text-xs text-text-secondary leading-relaxed">{marker.insight}</p>
+      <p className="text-xs text-text-muted/70 mt-0.5">Optimal: {marker.optimal}</p>
     </div>
   );
 }
@@ -488,7 +488,7 @@ function SuggestionGroup({
         {items.map((item, i) => (
           <li key={i} className="flex items-start gap-2">
             <Zap size={10} className="shrink-0 mt-0.5" style={{ color }} />
-            <span className="text-2xs text-text-secondary leading-relaxed">{item}</span>
+            <span className="text-xs text-text-secondary leading-relaxed">{item}</span>
           </li>
         ))}
       </ul>
@@ -513,16 +513,16 @@ function AllMarkersGrid({
     <div className="space-y-4">
       {Object.entries(grouped).map(([cat, markers]) => (
         <div key={cat}>
-          <p className="text-2xs font-semibold text-text-muted uppercase tracking-wider mb-2">{cat}</p>
+          <p className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-2">{cat}</p>
           <div className="grid grid-cols-2 gap-2">
             {markers.map((m) => {
               const color = getStatusColor(m.status);
               return (
                 <div key={m.key} className="bg-bg-elevated rounded-lg p-2.5">
-                  <p className="text-2xs text-text-muted truncate">{m.label}</p>
+                  <p className="text-xs text-text-secondary truncate">{m.label}</p>
                   <p className="text-xs font-bold mt-0.5 tabular-nums" style={{ color }}>
                     {m.value}{" "}
-                    <span className="text-2xs font-normal text-text-muted">{m.unit}</span>
+                    <span className="text-xs font-normal text-text-secondary">{m.unit}</span>
                   </p>
                 </div>
               );

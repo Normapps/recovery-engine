@@ -16,8 +16,258 @@ import {
 } from "@/lib/training-engine";
 import type { TrainingDay, TrainingPlan, WeekDay } from "@/lib/types";
 import {
-  ArrowLeft, Dumbbell, Edit3, Upload, Clock, Flame, TrendingUp, X, FileText,
+  ArrowLeft, Dumbbell, Edit3, Upload, Clock, Flame, TrendingUp, X, FileText, Info,
 } from "lucide-react";
+
+// ─── Training descriptions ────────────────────────────────────────────────────
+
+interface SessionInfo {
+  title:       string;
+  description: string;
+  tips:        string[];
+}
+
+const SESSION_INFO: Record<string, SessionInfo> = {
+  // ── Subtypes ──
+  "Long Run": {
+    title:       "Long Run",
+    description: "A steady aerobic effort at a comfortable, conversational pace. Builds your aerobic base, trains fat metabolism, and develops mental endurance for race day.",
+    tips:        ["Keep pace easy — you should be able to hold a conversation", "Fuel every 45–60 min on runs over 90 min", "Follow with extra sleep and a protein-rich meal"],
+  },
+  "Tempo Run": {
+    title:       "Tempo Run",
+    description: "A comfortably hard effort held for 20–40 minutes. Raises your lactate threshold so you can sustain a faster pace before fatigue sets in.",
+    tips:        ["Target ~80–85% max heart rate — 'comfortably hard'", "Warm up 10 min easy, cool down 10 min easy", "Avoid back-to-back tempo days — needs 48 h recovery"],
+  },
+  "Easy Run": {
+    title:       "Easy Run",
+    description: "A recovery-paced aerobic run. Maintains fitness without adding significant stress, promotes blood flow, and accelerates recovery from harder sessions.",
+    tips:        ["Heart rate should stay under 70% max", "If you feel stiff, slow down — never force the pace", "Great day to focus on form: tall posture, light footfall"],
+  },
+  "Intervals": {
+    title:       "Intervals",
+    description: "Short, high-intensity efforts with recovery periods between. Develops speed, VO₂ max, and running economy more efficiently than any other workout.",
+    tips:        ["Full recovery between reps — don't shortchange rest", "The last rep should feel as fast as the first", "Limit to once or twice per week — high CNS cost"],
+  },
+  "Hill Run": {
+    title:       "Hill Run",
+    description: "Running up inclines to build power, strength, and running economy. The incline forces better form and recruits muscles that flat running misses.",
+    tips:        ["Drive knees high and pump arms on the way up", "Jog back down as your recovery — don't walk unless needed", "Hills double as speed work — treat them as high intensity"],
+  },
+  "Fartlek": {
+    title:       "Fartlek",
+    description: "Swedish for 'speed play' — unstructured surges mixed into an easy run. Develops speed and aerobic capacity in a low-pressure, flexible format.",
+    tips:        ["Pick landmarks: sprint to the next lamp post, then recover", "No watch required — run by feel", "Good bridge between easy runs and structured intervals"],
+  },
+  "Recovery Run": {
+    title:       "Recovery Run",
+    description: "An intentionally slow run to flush metabolic waste and promote blood flow without adding training stress. The goal is active recovery, not fitness.",
+    tips:        ["Genuinely slow — slower than you think", "15–30 min is enough; longer doesn't mean better", "Walk if you feel off — recovery is the priority"],
+  },
+  "Full Body": {
+    title:       "Full Body Strength",
+    description: "A compound lifting session targeting all major muscle groups. Builds total-body strength, corrects imbalances, and supports injury prevention.",
+    tips:        ["Prioritise compound lifts: squat, hinge, push, pull", "Leave 1–2 reps in reserve — quality over fatigue", "Eat 20–40 g protein within 30–60 min post-session"],
+  },
+  "Upper Body": {
+    title:       "Upper Body Strength",
+    description: "Focused work on chest, shoulders, back, and arms. Builds the pulling and pushing strength that supports posture, power, and injury resilience.",
+    tips:        ["Balance push-to-pull ratio (aim 1:1 or more pull)", "Control the eccentric (lowering) phase — 2–3 seconds", "Shoulder health: include external rotation and face-pulls"],
+  },
+  "Lower Body": {
+    title:       "Lower Body Strength",
+    description: "Squats, deadlifts, lunges, and hip work to build leg power, glute strength, and joint stability that translates directly to sport and running.",
+    tips:        ["Brace your core before every heavy rep", "Single-leg work exposes and corrects imbalances", "Expect soreness 24–48 h later — plan easy days after"],
+  },
+  "Yoga": {
+    title:       "Yoga",
+    description: "A blend of mobility, breath work, and mindfulness. Reduces muscle tension, improves range of motion, and lowers cortisol — a powerful recovery tool.",
+    tips:        ["Focus on breath — exhale into the stretch, never force", "Yin or restorative yoga is ideal after hard training blocks", "Morning yoga activates the body; evening yoga calms the CNS"],
+  },
+  "Mobility": {
+    title:       "Mobility Session",
+    description: "Active movement through full joint ranges of motion. Fixes restrictions that cause compensation patterns and injury, and keeps you moving well long-term.",
+    tips:        ["Focus on your stiffest areas — hips, thoracic spine, ankles", "Hold positions 30–90 seconds to see lasting change", "Pair with foam rolling on sore or tight tissue"],
+  },
+  // ── Soccer / team sport subtypes ──
+  "Pre-Game Activation": {
+    title:       "Pre-Game Activation",
+    description: "A low-intensity warm-up session the day before competition. Fires up the neuromuscular system, maintains sharpness, and primes the body without adding fatigue.",
+    tips:        ["Keep it short — 30–45 min max", "Light technical work, dynamic stretching, finishing touches", "Focus on confidence and sharpness, not fitness"],
+  },
+  "Small-Sided Games": {
+    title:       "Small-Sided Games",
+    description: "Condensed-pitch matches (3v3, 4v4, 5v5) that develop decision-making, technical skill, and high-intensity effort in a game-realistic environment.",
+    tips:        ["Intensity is naturally high — monitor total load", "Emphasise quick decisions under pressure", "More touches per player than full-sided — great for development"],
+  },
+  "Tactical Training": {
+    title:       "Tactical Training",
+    description: "Organised team shape work — defensive structure, pressing triggers, build-up patterns, and positional play. The brain works as hard as the body.",
+    tips:        ["Walk-throughs first, then build to match speed", "Video review the day after to reinforce concepts", "Intensity is moderate — focus on execution, not effort"],
+  },
+  "Technical Training": {
+    title:       "Technical Training",
+    description: "Skill-focused work on passing, receiving, finishing, and individual technique. Builds the foundation that tactical systems are built on.",
+    tips:        ["High reps at game speed — make it realistic", "Quality over quantity: stop and correct rather than rush", "Great session for younger or developing players"],
+  },
+  "Possession Play": {
+    title:       "Possession Play",
+    description: "Rondos, keep-away, and structured possession exercises that develop comfort under pressure, spacing, and team rhythm.",
+    tips:        ["Keep the geometry — width and depth matter", "First touch quality determines everything else", "Defend hard when you lose it — the press is part of the drill"],
+  },
+  "Set Pieces": {
+    title:       "Set Pieces",
+    description: "Rehearsed corners, free kicks, throw-ins, and defensive organisation. Set pieces account for a significant percentage of goals at all levels.",
+    tips:        ["Repetition is the point — run each routine 5–10 times", "Everyone needs to know their role and trigger", "Defensive set pieces are as important as attacking ones"],
+  },
+  "High Press Drills": {
+    title:       "High Press Drills",
+    description: "Coordinated high-intensity pressing patterns to win the ball high up the pitch. Demanding aerobically and tactically — requires total team buy-in.",
+    tips:        ["Triggers matter — press on a cue, not randomly", "The first press sets the shape for teammates behind", "High physical cost — schedule adequate recovery after"],
+  },
+  "Conditioning": {
+    title:       "Conditioning",
+    description: "Fitness-focused work designed to build the aerobic and anaerobic capacity needed to compete at full intensity for 90 minutes.",
+    tips:        ["Game-based conditioning (SSGs) > pure running for most players", "Track total distance and sprint count where possible", "Taper conditioning load in the 48–72 h before a game"],
+  },
+  "Walkthrough": {
+    title:       "Walkthrough",
+    description: "Low-intensity tactical review at walking pace. Reinforces shape, roles, and game plan without any physical stress the day before competition.",
+    tips:        ["Purely mental — no one should break a sweat", "Use cones and visual aids to lock in positioning", "Short and sharp — 20–30 min is ideal"],
+  },
+  // ── Generic training types ──
+  "strength": {
+    title:       "Strength Training",
+    description: "Resistance work to build muscle, increase force output, and protect joints. Essential for all athletes regardless of primary sport.",
+    tips:        ["Progressive overload: add small amounts weekly", "Sleep is when you actually get stronger — prioritise 8 h", "Track your lifts so you know you're progressing"],
+  },
+  "cardio": {
+    title:       "Cardio Session",
+    description: "Aerobic training that elevates heart rate to improve cardiovascular fitness, endurance, and metabolic health.",
+    tips:        ["Mix intensities through the week — not every session hard", "Nasal breathing during easy efforts signals the right zone", "Hydrate: 400–600 ml per hour of moderate exercise"],
+  },
+  "practice": {
+    title:       "Practice / Drill",
+    description: "Skill-focused training session. Reinforces technique, game patterns, and sport-specific movements at controlled intensity.",
+    tips:        ["Mental focus matters as much as physical effort here", "Film yourself occasionally — you'll catch form cues you can't feel", "Cool down with light stretching to start the recovery process"],
+  },
+  "game": {
+    title:       "Game / Race / Competition",
+    description: "Full competitive effort. The culmination of your training week — give your best, manage effort intelligently, and recover well afterward.",
+    tips:        ["Trust your training — don't try anything new on game day", "Sleep well the night before the night before (2 nights out matters most)", "Prioritise nutrition and sleep for the 48 h following competition"],
+  },
+  "recovery": {
+    title:       "Recovery Day",
+    description: "Active or passive recovery to let your body absorb the week's training load. Adaptations happen during rest — this day is doing real work.",
+    tips:        ["Light movement is better than complete rest for most athletes", "Prioritise 8–9 h sleep — recovery happens predominantly overnight", "Hydrate, eat quality food, and limit alcohol"],
+  },
+  "off": {
+    title:       "Rest Day",
+    description: "Complete rest. Your body repairs muscle damage, restores glycogen, and consolidates neuromuscular adaptations from the week. Don't skip this.",
+    tips:        ["Passive rest is valid — don't guilt-trip yourself into moving", "Use the time for meal prep, sleep, and mental decompression", "If you feel the urge to train, a gentle 20-min walk is the ceiling"],
+  },
+};
+
+function getSessionInfo(day: TrainingDay): SessionInfo {
+  // BUG-FIX #20: subtype → training_type → generic fallback that matches the
+  // actual training category rather than hardcoding "cardio" for everything.
+  return (
+    SESSION_INFO[day.subtype ?? ""] ??
+    SESSION_INFO[day.training_type] ??
+    SESSION_INFO["cardio"]   // genuine last resort — only hits for unknown types
+  );
+}
+
+// ─── Session detail modal ─────────────────────────────────────────────────────
+
+function SessionModal({ day, onClose }: { day: TrainingDay; onClose: () => void }) {
+  const info    = getSessionInfo(day);
+  const color   = TYPE_COLOR[day.training_type];
+  const label   = day.subtype ?? TYPE_LABEL[day.training_type];
+
+  // Close on backdrop click or Escape key
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) { if (e.key === "Escape") onClose(); }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm animate-fade-in"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-md bg-bg-card border border-bg-border rounded-t-3xl p-6 pb-8 shadow-2xl animate-slide-up"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-start justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <div
+              className="w-10 h-10 rounded-2xl flex items-center justify-center"
+              style={{ backgroundColor: `${color}20` }}
+            >
+              <Flame size={18} style={{ color }} />
+            </div>
+            <div>
+              <p className="text-xs text-text-muted font-semibold uppercase tracking-widest">{day.day}</p>
+              <h3 className="text-base font-bold text-text-primary">{info.title}</h3>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-text-muted hover:text-text-secondary transition-colors mt-1"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Badges */}
+        <div className="flex gap-2 mb-4">
+          <span
+            className="text-2xs font-bold px-2.5 py-1 rounded-full uppercase tracking-wide"
+            style={{ backgroundColor: `${color}20`, color }}
+          >
+            {label}
+          </span>
+          <span className="text-2xs font-bold px-2.5 py-1 rounded-full uppercase tracking-wide bg-bg-elevated text-text-muted">
+            {INTENSITY_LABEL[day.intensity]}
+          </span>
+          {day.duration > 0 && (
+            <span className="text-2xs font-bold px-2.5 py-1 rounded-full uppercase tracking-wide bg-bg-elevated text-text-muted">
+              {formatDuration(day.duration)}
+            </span>
+          )}
+          {day.distance !== undefined && (
+            <span className="text-2xs font-bold px-2.5 py-1 rounded-full uppercase tracking-wide bg-bg-elevated text-text-muted">
+              {day.distance} {day.distanceUnit ?? "mi"}
+            </span>
+          )}
+        </div>
+
+        {/* Description */}
+        <p className="text-sm text-text-secondary leading-relaxed mb-5">
+          {info.description}
+        </p>
+
+        {/* Tips */}
+        <div className="flex flex-col gap-2">
+          <p className="text-xs font-bold text-text-secondary uppercase tracking-widest mb-1">Tips</p>
+          {info.tips.map((tip, i) => (
+            <div key={i} className="flex items-start gap-2.5">
+              <div
+                className="w-1.5 h-1.5 rounded-full mt-1.5 shrink-0"
+                style={{ backgroundColor: color }}
+              />
+              <p className="text-xs text-text-secondary leading-relaxed">{tip}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 const WEEK_DAYS: WeekDay[] = [
   "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday",
@@ -149,7 +399,7 @@ function WeekStrip({
               </span>
             </div>
             {d.training_type !== "off" && (
-              <span className="text-2xs text-text-muted tabular-nums">
+              <span className="text-xs text-text-secondary tabular-nums">
                 {formatDuration(d.duration)}
               </span>
             )}
@@ -219,7 +469,7 @@ function PlanUploader({
   onParsed,
   onCancel,
 }: {
-  onParsed: (days: TrainingDay[]) => void;
+  onParsed: (days: TrainingDay[], sport?: string) => void;
   onCancel: () => void;
 }) {
   const [uploadState, setUploadState] = useState<UploadState>("idle");
@@ -249,7 +499,7 @@ function PlanUploader({
 
       console.log("Uploading:", file.name, file.type, file.size);
 
-      const res = await fetch("/api/parse-training-plan", {
+      const res = await fetch("/api/upload-training", {
         method: "POST",
         body: formData,
       });
@@ -261,12 +511,14 @@ function PlanUploader({
         throw new Error(data.error ?? "Upload failed.");
       }
 
-      if (!Array.isArray(data.days) || data.days.length === 0) {
+      const days  = data.plan?.days ?? data.days;
+      const sport = data.plan?.sport ?? data.sport ?? undefined;
+      if (!Array.isArray(days) || days.length === 0) {
         throw new Error("No training days could be parsed from the file.");
       }
 
-      console.log("Parsed days:", data.days.length);
-      onParsed(data.days as TrainingDay[]);
+      console.log("Parsed days:", days.length, "| sport:", sport);
+      onParsed(days as TrainingDay[], sport);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Something went wrong.";
       setErrorMsg(msg);
@@ -433,6 +685,8 @@ export default function TrainingPage() {
   const [editing,   setEditing]   = useState(false);
   const [uploading, setUploading] = useState(false);
 
+  const [selectedDay, setSelectedDay] = useState<TrainingDay | null>(null);
+
   const todayDay    = getTodayDay();
   const tomorrowDay = getTomorrowDay();
 
@@ -443,16 +697,22 @@ export default function TrainingPage() {
     setEditing(false);
   }
 
-  function handleUploadedPlan(days: TrainingDay[]) {
+  function handleUploadedPlan(days: TrainingDay[], sport?: string) {
     // Sort Mon-Sun (should already be sorted by API, but enforce here too)
     const sorted = [...days].sort(
       (a, b) => WEEK_DAYS.indexOf(a.day) - WEEK_DAYS.indexOf(b.day)
     );
 
+    // Build a human-readable plan name from the detected sport
+    const sportLabel = sport
+      ? sport.charAt(0).toUpperCase() + sport.slice(1) + " Training Plan"
+      : "Uploaded Training Plan";
+
     const now = new Date().toISOString();
     const plan: TrainingPlan = {
       id:             crypto.randomUUID(),
-      name:           "Uploaded Plan",
+      name:           sportLabel,
+      sport,                          // preserve detected sport throughout app
       rawInput:       JSON.stringify(sorted),
       weeklySchedule: sorted,
       createdAt:      now,
@@ -550,6 +810,11 @@ export default function TrainingPage() {
   return (
     <div className="flex flex-col gap-6 animate-fade-in">
 
+      {/* Session detail modal */}
+      {selectedDay && (
+        <SessionModal day={selectedDay} onClose={() => setSelectedDay(null)} />
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -558,15 +823,25 @@ export default function TrainingPage() {
           </Link>
           <div>
             <h1 className="text-xl font-bold text-text-primary">Training</h1>
-            <p className="text-xs text-text-muted mt-0.5">Weekly plan</p>
+            <p className="text-xs text-text-muted mt-0.5">
+              {trainingPlan?.name ?? "Weekly plan"}
+            </p>
           </div>
         </div>
-        <button
-          onClick={() => setEditing(true)}
-          className="flex items-center gap-1.5 text-gold border border-gold/40 rounded-xl px-3 py-2 text-xs font-bold hover:bg-gold/10 transition-colors"
-        >
-          <Edit3 size={12} /> Edit
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setUploading(true)}
+            className="flex items-center gap-1.5 bg-gold text-bg-primary rounded-xl px-3 py-2 text-xs font-bold hover:bg-gold-light transition-colors"
+          >
+            <Upload size={12} /> Upload Training Plan
+          </button>
+          <button
+            onClick={() => setEditing(true)}
+            className="flex items-center gap-1.5 text-gold border border-gold/40 rounded-xl px-3 py-2 text-xs font-bold hover:bg-gold/10 transition-colors"
+          >
+            <Edit3 size={12} /> Edit
+          </button>
+        </div>
       </div>
 
       {/* Info card */}
@@ -643,10 +918,14 @@ export default function TrainingPage() {
                   {d.day}
                   {isToday && <span className="text-2xs ml-1 text-gold/70">TODAY</span>}
                 </span>
-                {/* Subtype or type label */}
-                <span className="flex-1 text-sm font-semibold text-text-primary">
+                {/* Subtype or type label — tappable to open detail modal */}
+                <button
+                  onClick={() => setSelectedDay(d)}
+                  className="flex-1 flex items-center gap-1.5 text-sm font-semibold text-text-primary hover:text-gold transition-colors text-left group"
+                >
                   {d.subtype ?? TYPE_LABEL[d.training_type]}
-                </span>
+                  <Info size={11} className="text-text-muted/50 group-hover:text-gold/70 transition-colors shrink-0" />
+                </button>
                 {/* Distance / duration */}
                 <span className="text-xs text-text-muted tabular-nums text-right">
                   {metric}
@@ -657,21 +936,6 @@ export default function TrainingPage() {
         </div>
       </section>
 
-      {/* Actions */}
-      <div className="flex gap-3">
-        <button
-          onClick={() => setEditing(true)}
-          className="flex-1 flex items-center justify-center gap-2 py-3.5 rounded-2xl border border-bg-border bg-bg-card text-sm font-semibold text-text-secondary hover:border-text-muted/40 transition-colors"
-        >
-          <Edit3 size={14} /> Edit Plan
-        </button>
-        <button
-          onClick={() => setUploading(true)}
-          className="flex-1 flex items-center justify-center gap-2 py-3.5 rounded-2xl border border-bg-border bg-bg-card text-sm font-semibold text-text-muted hover:text-text-secondary transition-colors"
-        >
-          <Upload size={14} /> Replace
-        </button>
-      </div>
 
     </div>
   );

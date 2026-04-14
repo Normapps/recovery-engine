@@ -46,9 +46,10 @@ const SOURCE_INFO: Record<WearableSource, { label: string; icon: React.ReactNode
 };
 
 export default function ImportPage() {
-  const upsertEntry = useStore((s) => s.upsertEntry);
-  const upsertScore = useStore((s) => s.upsertScore);
+  const upsertEntry     = useStore((s) => s.upsertEntry);
+  const upsertScore     = useStore((s) => s.upsertScore);
   const existingEntries = useStore((s) => s.entries);
+  const trainingPlan    = useStore((s) => s.trainingPlan);
 
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
@@ -111,7 +112,14 @@ export default function ImportPage() {
       const history = Object.values(existingEntries)
         .filter((e) => e.date < day.date)
         .sort((a, b) => b.date.localeCompare(a.date));
-      const score: RecoveryScore = computeFinalRecoveryScore(entry, history);
+      const score: RecoveryScore = computeFinalRecoveryScore(
+        entry,
+        history,
+        null,    // no bloodwork on wearable import
+        null,    // todayPlan — not relevant for historical import
+        null,
+        trainingPlan?.weeklySchedule,  // Stage 5b: accumulated weekly fatigue
+      );
       upsertEntry(entry);
       upsertScore(score);
     }
@@ -147,7 +155,7 @@ export default function ImportPage() {
                 <span style={{ color: info.color }}>{info.icon}</span>
                 <span className="text-xs font-semibold text-text-primary">{info.label}</span>
               </div>
-              <p className="text-2xs text-text-muted leading-relaxed">{info.instructions}</p>
+              <p className="text-xs text-text-secondary leading-relaxed">{info.instructions}</p>
             </div>
           );
         })}
@@ -199,11 +207,11 @@ export default function ImportPage() {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="bg-bg-elevated rounded-xl p-3">
-                <p className="text-2xs text-text-muted uppercase tracking-wider">Days found</p>
+                <p className="text-xs font-medium text-text-secondary uppercase tracking-wider">Days found</p>
                 <p className="text-2xl font-bold text-text-primary mt-1">{result.days.length}</p>
               </div>
               <div className="bg-bg-elevated rounded-xl p-3">
-                <p className="text-2xs text-text-muted uppercase tracking-wider">Date range</p>
+                <p className="text-xs font-medium text-text-secondary uppercase tracking-wider">Date range</p>
                 <p className="text-sm font-bold text-text-primary mt-1">
                   {result.days.length > 0 ? (
                     <>
@@ -216,9 +224,9 @@ export default function ImportPage() {
             </div>
             {result.errors.length > 0 && (
               <div className="mt-3 pt-3 border-t border-bg-border">
-                <p className="text-2xs text-text-muted uppercase tracking-wider mb-1.5">{result.errors.length} parse warnings</p>
+                <p className="text-xs font-medium text-text-secondary uppercase tracking-wider mb-1.5">{result.errors.length} parse warnings</p>
                 {result.errors.slice(0, 3).map((e, i) => (
-                  <p key={i} className="text-2xs text-text-muted">• {e}</p>
+                  <p key={i} className="text-xs text-text-secondary">• {e}</p>
                 ))}
               </div>
             )}
@@ -237,7 +245,7 @@ export default function ImportPage() {
             <div className="bg-bg-card border border-bg-border rounded-2xl overflow-hidden">
               <div className="grid grid-cols-4 gap-2 px-4 py-2 border-b border-bg-border">
                 {["Date", "HRV", "RHR", "Sleep"].map((h) => (
-                  <span key={h} className="text-2xs text-text-muted uppercase tracking-wider">{h}</span>
+                  <span key={h} className="text-xs font-medium text-text-secondary uppercase tracking-wider">{h}</span>
                 ))}
               </div>
               <div className="max-h-64 overflow-y-auto">
@@ -260,7 +268,7 @@ export default function ImportPage() {
           >
             Import {result.days.length} Days into Recovery Engine
           </button>
-          <p className="text-2xs text-text-muted text-center px-4">
+          <p className="text-xs text-text-secondary text-center px-4">
             Existing manually-entered values will be preserved. Wearable data fills in missing fields only.
           </p>
         </div>

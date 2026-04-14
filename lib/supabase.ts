@@ -7,7 +7,7 @@
  */
 
 import { createClient } from "@supabase/supabase-js";
-import type { PlanTaskItem } from "./types";
+import type { PlanTaskItem, TrainingDay } from "./types";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
@@ -99,4 +99,37 @@ export async function upsertPlanTasks(
   await supabase
     .from("plan_tasks")
     .upsert({ date, tasks }, { onConflict: "date" });
+}
+
+/**
+ * Persist a parsed training plan after PDF upload.
+ *
+ * Table: training_plans
+ * Columns:
+ *   id          uuid primary key default gen_random_uuid()
+ *   user_id     text (null until auth is wired)
+ *   sport       text
+ *   schedule    jsonb  (TrainingDay[])
+ *   created_at  timestamptz default now()
+ *
+ * SQL to create the table:
+ *   create table training_plans (
+ *     id         uuid primary key default gen_random_uuid(),
+ *     user_id    text,
+ *     sport      text not null,
+ *     schedule   jsonb not null default '[]',
+ *     created_at timestamptz default now()
+ *   );
+ *
+ * No-ops when Supabase is not configured (offline / localStorage mode).
+ */
+export async function upsertTrainingPlan(payload: {
+  user_id:    string | null;
+  sport:      string;
+  schedule:   TrainingDay[];
+  created_at: string;
+}): Promise<void> {
+  if (!supabase) return;
+  const { error } = await supabase.from("training_plans").insert(payload);
+  if (error) console.error("[supabase] upsertTrainingPlan error:", error.message);
 }

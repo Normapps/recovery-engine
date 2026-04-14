@@ -24,8 +24,8 @@ function BiomarkerInput({
   return (
     <div className="flex flex-col gap-1">
       <div className="flex items-baseline justify-between">
-        <label className="text-2xs text-text-muted uppercase tracking-wider">{label}</label>
-        <span className="text-2xs text-text-muted/60 italic truncate max-w-[120px]">{optimal}</span>
+        <label className="text-xs font-medium text-text-secondary uppercase tracking-wider">{label}</label>
+        <span className="text-xs text-text-muted/70 italic truncate max-w-[120px]">{optimal}</span>
       </div>
       <div className="flex items-center gap-2 bg-bg-elevated border border-bg-border rounded-xl px-3 py-2">
         <input
@@ -34,7 +34,7 @@ function BiomarkerInput({
           onChange={(e) => { const v = e.target.value; onChange(v === "" ? null : parseFloat(v)); }}
           className="flex-1 bg-transparent text-sm text-text-primary outline-none placeholder-text-muted tabular-nums min-w-0"
         />
-        <span className="text-2xs text-text-muted shrink-0">{unit}</span>
+        <span className="text-xs text-text-secondary shrink-0">{unit}</span>
       </div>
     </div>
   );
@@ -272,7 +272,7 @@ export default function BloodworkForm({ onSubmitted }: { onSubmitted?: () => voi
         <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-3">Lab Info</h3>
         <div className="flex flex-col gap-3">
           <div className="flex flex-col gap-1">
-            <label className="text-2xs text-text-muted uppercase tracking-wider">Lab Name</label>
+            <label className="text-xs font-medium text-text-secondary uppercase tracking-wider">Lab Name</label>
             <input
               type="text" value={labName} placeholder="e.g. LabCorp, Quest, Inside Tracker"
               onChange={(e) => setLabName(e.target.value)}
@@ -280,7 +280,7 @@ export default function BloodworkForm({ onSubmitted }: { onSubmitted?: () => voi
             />
           </div>
           <div className="flex flex-col gap-1">
-            <label className="text-2xs text-text-muted uppercase tracking-wider">Notes (optional)</label>
+            <label className="text-xs font-medium text-text-secondary uppercase tracking-wider">Notes (optional)</label>
             <input
               type="text" value={notes} placeholder="e.g. Fasted 12h, post-deload week"
               onChange={(e) => setNotes(e.target.value)}
@@ -560,7 +560,7 @@ export default function BloodworkForm({ onSubmitted }: { onSubmitted?: () => voi
             </div>
             {analysis.topConcerns.length > 0 && (
               <div className="mt-3 pt-3 border-t border-bg-border">
-                <p className="text-2xs text-text-muted uppercase tracking-wider mb-1.5">Top concerns</p>
+                <p className="text-xs font-medium text-text-secondary uppercase tracking-wider mb-1.5">Top concerns</p>
                 {analysis.topConcerns.slice(0, 3).map((m) => (
                   <p key={m.key} className="text-xs text-recovery-low">• {m.label}: {m.value} {m.unit}</p>
                 ))}

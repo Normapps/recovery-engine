@@ -55,10 +55,10 @@ export default function ScoreOverride({ date, calculatedScore, adjustedScore }: 
       {active && (
         <div className="flex flex-col gap-3">
           <div className="flex items-center justify-between">
-            <span className="text-2xs text-text-muted">
+            <span className="text-xs text-text-secondary">
               Algorithm: <span className="text-text-secondary">{calculatedScore}</span>
             </span>
-            <span className="text-2xs text-text-muted">
+            <span className="text-xs text-text-secondary">
               Your Score:{" "}
               <span className="font-bold tabular-nums" style={{ color }}>
                 {value}
@@ -86,7 +86,7 @@ export default function ScoreOverride({ date, calculatedScore, adjustedScore }: 
             style={{ accentColor: color }}
           />
 
-          <div className="flex justify-between text-2xs text-text-muted">
+          <div className="flex justify-between text-xs text-text-secondary">
             <span>0</span>
             <span>50</span>
             <span>100</span>
