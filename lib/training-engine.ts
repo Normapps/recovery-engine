@@ -434,6 +434,67 @@ export function planToText(plan: TrainingPlan): string {
     .join("\n");
 }
 
+// ─── Training load ────────────────────────────────────────────────────────────
+
+const INTENSITY_FACTOR: Record<IntensityLevel, number> = {
+  low:      1.0,
+  moderate: 1.5,
+  high:     2.0,
+};
+
+/**
+ * Calculate a daily training load score for one TrainingDay.
+ *
+ * Base load:
+ *   distance-based → distance_miles × 10 × intensity_factor
+ *   time-based     → duration_minutes × intensity_factor
+ *   (distance takes priority when both are present)
+ *
+ * Bonuses / penalties applied after base:
+ *   Long Run subtype → +10
+ *   Game type        → +20
+ *   Recovery type    → result × 0.5
+ *   Off              → 0
+ */
+export function calculateLoadScore(day: TrainingDay): number {
+  if (day.training_type === "off") return 0;
+
+  const factor = INTENSITY_FACTOR[day.intensity];
+
+  // Base: prefer distance over duration
+  let base: number;
+  if (day.distance !== undefined && day.distance > 0) {
+    // Convert km to miles before applying load formula
+    const miles =
+      day.distanceUnit === "km" ? day.distance * 0.621 : day.distance;
+    base = miles * 10 * factor;
+  } else {
+    base = day.duration * factor;
+  }
+
+  // Bonuses
+  const subtype = (day.subtype ?? "").toLowerCase();
+  if (subtype.includes("long run")) base += 10;
+  if (day.training_type === "game") base += 20;
+
+  // Recovery penalty
+  if (day.training_type === "recovery") base *= 0.5;
+
+  return Math.round(base);
+}
+
+/**
+ * Return a load score for every day in the plan, sorted Monday → Sunday.
+ */
+export function getWeeklyLoad(
+  plan: TrainingPlan,
+): Array<{ day: WeekDay; load_score: number }> {
+  return plan.weeklySchedule.map((d) => ({
+    day:        d.day,
+    load_score: calculateLoadScore(d),
+  }));
+}
+
 // ─── Today / tomorrow helpers ─────────────────────────────────────────────────
 
 export function getTodayDay(): WeekDay {
