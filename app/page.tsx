@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { format } from "date-fns";
 import Link from "next/link";
 import { useStore, useLatestBloodwork } from "@/lib/store";
@@ -656,6 +656,88 @@ function CompletedTasksCard({
   );
 }
 
+// ─── Execution toast ─────────────────────────────────────────────────────────
+
+/**
+ * ExecutionToast
+ *
+ * Renders "You executed today." as a brief, self-dismissing overlay message.
+ *
+ * Lifecycle:
+ *   visible=true → fade-in (300 ms) → hold (1 200 ms) → fade-out (500 ms) → hidden
+ *
+ * The parent is responsible for the once-per-day gate (see useExecutionToast).
+ */
+function ExecutionToast({ visible }: { visible: boolean }) {
+  const [phase, setPhase] = useState<"hidden" | "in" | "hold" | "out">("hidden");
+
+  useEffect(() => {
+    if (!visible) return;
+
+    setPhase("in");
+    const holdTimer = setTimeout(() => setPhase("hold"), 300);
+    const outTimer  = setTimeout(() => setPhase("out"),  300 + 1200);
+    const hideTimer = setTimeout(() => setPhase("hidden"), 300 + 1200 + 500);
+
+    return () => {
+      clearTimeout(holdTimer);
+      clearTimeout(outTimer);
+      clearTimeout(hideTimer);
+    };
+  }, [visible]);
+
+  if (phase === "hidden") return null;
+
+  const opacity =
+    phase === "in"   ? "opacity-0 animate-[fadeIn_300ms_ease_forwards]"  :
+    phase === "hold" ? "opacity-100"                                       :
+                       "opacity-0 transition-opacity duration-500 ease-out";
+
+  return (
+    <div
+      aria-live="polite"
+      className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-50 pointer-events-none ${opacity}`}
+    >
+      <div className="bg-emerald-950/90 border border-emerald-500/25 backdrop-blur-sm rounded-xl px-5 py-2.5 shadow-lg">
+        <p className="text-xs font-semibold text-emerald-300 tracking-wide whitespace-nowrap">
+          You executed today.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * useExecutionToast
+ *
+ * Watches the plan-task list and fires the toast exactly once per calendar day
+ * the moment all tasks are completed.
+ *
+ * @param tasks   Current day's PlanTaskItem array (empty array = no-op)
+ * @param dateKey YYYY-MM-DD key for today — resets the gate on a new day
+ */
+function useExecutionToast(tasks: PlanTaskItem[], dateKey: string): boolean {
+  const [toastVisible, setToastVisible]       = useState(false);
+  // Tracks the date on which the toast has already fired to prevent re-trigger
+  const firedDateRef = React.useRef<string | null>(null);
+
+  useEffect(() => {
+    if (tasks.length === 0) return;                          // no tasks yet
+    if (firedDateRef.current === dateKey) return;            // already fired today
+    const allDone = tasks.every((t) => t.completed);
+    if (!allDone) return;
+
+    firedDateRef.current = dateKey;
+    setToastVisible(true);
+
+    // Reset flag after animation completes so component stays clean
+    const reset = setTimeout(() => setToastVisible(false), 300 + 1200 + 500 + 100);
+    return () => clearTimeout(reset);
+  }, [tasks, dateKey]);
+
+  return toastVisible;
+}
+
 // ─── Plan task helpers ───────────────────────────────────────────────────────
 
 /**
@@ -1021,6 +1103,9 @@ function DashboardContent({
     upsertPlanTasks(dateKey, updated);
   };
 
+  // ── Execution toast — fires once on the day all tasks are completed ───────
+  const executionToastVisible = useExecutionToast(storedPlanTasks ?? [], dateKey);
+
   // ── Sleep card details ────────────────────────────────────────────────
   const sleepDetails = [
     todayEntry.sleep.duration   ? `${todayEntry.sleep.duration}h sleep` : null,
@@ -1284,6 +1369,10 @@ function DashboardContent({
         </div>
         <ChevronRight size={16} className="text-text-muted" />
       </Link>
+
+      {/* ── Execution toast ─────────────────────────────────────────────── */}
+      <ExecutionToast visible={executionToastVisible} />
+
     </div>
   );
 }
