@@ -103,8 +103,14 @@ export type ReadinessZone = "high" | "ready" | "limited" | "not_ready";
 /** Internal input shape for computeReadinessScore — not exported. */
 interface ReadinessInput {
   recovery_score:      number;  // 0–100 base
-  load_today_score:    number;  // 0–100 (sessionLoadAU → normalised)
-  load_tomorrow_score: number;  // 0–100 (tomorrowPlan AU → normalised)
+  load_today_score:    number;  // 0–100 (sessionLoadAU → normalised, kept for compat)
+  load_tomorrow_score: number;  // 0–100 (tomorrowPlan AU → normalised, kept for compat)
+  /** Intensity of today's planned session — drives the primary readiness deduction. */
+  intensity_today?:    IntensityLevel;
+  /** Intensity of tomorrow's planned session — drives the predictive -5 penalty. */
+  intensity_tomorrow?: IntensityLevel;
+  /** True when tomorrow is a game/race (applies predictive penalty regardless of intensity). */
+  tomorrow_is_game?:   boolean;
   injury: {
     active:   boolean;
     severity: number;  // 1–5; only used when active = true
@@ -114,6 +120,36 @@ interface ReadinessInput {
     hrv_trend:   "up" | "stable" | "down";
     sleep_trend: "stable" | "volatile";
   };
+}
+
+// ─── Load modifier constants ──────────────────────────────────────────────────
+
+/** Readiness deduction per today's session intensity (spec: low −5, mod −10, high −20). */
+const READINESS_LOAD_MODIFIER: Record<IntensityLevel, number> = {
+  low:      -5,
+  moderate: -10,
+  high:     -20,
+};
+
+/**
+ * Accumulated fatigue penalty from multiple high-load days this week.
+ *
+ * Athletes running 3–4 high-intensity sessions per week accumulate systemic
+ * fatigue that is not fully captured by today's single-session modifier.
+ *
+ * Returns:
+ *   −10  when 5+ days in the week are high intensity  (overreaching territory)
+ *   −5   when 3–4 days are high intensity             (significant cumulative load)
+ *   0    otherwise                                      (normal load profile)
+ */
+function computeAccumulatedFatigue(weeklySchedule?: TrainingDay[]): number {
+  if (!weeklySchedule || weeklySchedule.length === 0) return 0;
+  const highDays = weeklySchedule.filter(
+    (d) => d.training_type !== "off" && d.intensity === "high"
+  ).length;
+  if (highDays >= 5) return -10;
+  if (highDays >= 3) return -5;
+  return 0;
 }
 
 /**
@@ -136,14 +172,28 @@ function computeReadinessScore(input: ReadinessInput): {
 } {
   let readiness = input.recovery_score;
 
-  // ── Step 2: Load stress (largest factor) ──────────────────────────────────
-  const combined_load =
-    input.load_today_score * 0.6 + input.load_tomorrow_score * 0.4;
+  // ── Step 2: Load stress ────────────────────────────────────────────────────
+  // Primary deduction: today's session intensity → −5 / −10 / −20.
+  // Falls back to AU-based thresholds when no intensity is available
+  // (e.g. computeDashboardReadiness called without a training plan).
+  if (input.intensity_today) {
+    readiness += READINESS_LOAD_MODIFIER[input.intensity_today];
+  } else {
+    const combined_load =
+      input.load_today_score * 0.6 + input.load_tomorrow_score * 0.4;
+    if      (combined_load > 75) readiness -= 25;
+    else if (combined_load > 50) readiness -= 15;
+    else if (combined_load > 30) readiness -= 8;
+    else                         readiness -= 3;
+  }
 
-  if      (combined_load > 75) readiness -= 25;
-  else if (combined_load > 50) readiness -= 15;
-  else if (combined_load > 30) readiness -= 8;
-  else                         readiness -= 3;
+  // Predictive penalty: hard or game day tomorrow → conserve today (spec: −5).
+  if (
+    input.intensity_tomorrow === "high" ||
+    input.tomorrow_is_game   === true
+  ) {
+    readiness -= 5;
+  }
 
   // ── Step 3a: Injury severity (conditional on injury.active) ───────────────
   if (input.injury.active) {
@@ -493,6 +543,13 @@ export function runScoringPipeline(
   moodRating?:          number | null,
   yesterdayTasks?:      ComplianceTaskInput[],
   previousModalities?:  string[],
+  /**
+   * Full weekly schedule from the active training plan.
+   * Used to compute accumulated fatigue from multiple high-load days.
+   * Pass `trainingPlan?.weeklySchedule` at the call site.
+   * Omit (or pass undefined) for neutral behaviour — no accumulated fatigue.
+   */
+  weeklySchedule?:      TrainingDay[],
 ): ScoringPipelineOutput {
 
   // ── Stage 2: Recovery State ──────────────────────────────────────────────
@@ -615,6 +672,11 @@ export function runScoringPipeline(
       recovery_score,
       load_today_score,
       load_tomorrow_score,
+      // Intensity-based deductions (spec: low −5 / moderate −10 / high −20).
+      // Defined when a training plan exists; undefined → falls back to AU thresholds.
+      intensity_today:    todayPlan?.training_type !== "off" ? todayPlan?.intensity : undefined,
+      intensity_tomorrow: tomorrowPlan?.training_type !== "off" ? tomorrowPlan?.intensity : undefined,
+      tomorrow_is_game:   tomorrowPlan?.training_type === "game",
       injury: {
         active:   false,
         severity: 0,
@@ -622,6 +684,16 @@ export function runScoringPipeline(
       },
       trends: { hrv_trend, sleep_trend },
     });
+
+  // ── Accumulated fatigue ───────────────────────────────────────────────────
+  //
+  // Multiple high-intensity days in the same week compound systemic fatigue
+  // beyond what a single-session modifier captures.
+  //
+  // Penalty: −5 (3–4 high days) | −10 (5+ high days) | 0 (otherwise).
+  // Applied to both recovery_score and readiness_score before compliance so
+  // the downstream pipeline sees the true load-adjusted baseline.
+  const fatiguePenalty = computeAccumulatedFatigue(weeklySchedule);
 
   // ── Stage 8: Compliance modifier ─────────────────────────────────────────
   //
@@ -637,8 +709,8 @@ export function runScoringPipeline(
   const compliance = computeComplianceModifier(yesterdayTasks ?? []);
   const { compliance_modifier } = compliance;
 
-  const recovery_score_final  = clamp(recovery_score  + compliance_modifier, 0, 100);
-  const readiness_score_final = clamp(rawReadinessScore + compliance_modifier, 0, 100);
+  const recovery_score_final  = clamp(recovery_score  + fatiguePenalty + compliance_modifier, 0, 100);
+  const readiness_score_final = clamp(rawReadinessScore + fatiguePenalty + compliance_modifier, 0, 100);
 
   // Re-derive zone from the compliance-adjusted recovery score
   const zone_final = getFinalZone(recovery_score_final);

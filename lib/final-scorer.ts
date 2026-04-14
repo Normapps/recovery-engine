@@ -110,6 +110,14 @@ interface TrainingPlanStageResult {
   tomorrowDelta: number;
 }
 
+// Intensity-to-recovery-score modifiers (spec: low −5, moderate −10, high −20).
+// Applied at 50% for recovery_score (softer than readiness — measured state vs. capacity).
+const RECOVERY_LOAD_MODIFIER: Record<string, number> = {
+  low:      -5,
+  moderate: -10,
+  high:     -20,
+};
+
 function applyTrainingPlanStage(
   todayPlan:    TrainingDay | null | undefined,
   tomorrowPlan: TrainingDay | null | undefined,
@@ -117,20 +125,21 @@ function applyTrainingPlanStage(
   let todayDelta = 0;
   let tomorrowDelta = 0;
 
-  if (todayPlan) {
-    // Today's intensity taxes recovery
-    todayDelta += todayPlan.intensity === "high" ? -5 :
-                  todayPlan.intensity === "moderate" ? -3 : -1;
-    // Game day carries an additional systemic stress tax
+  if (todayPlan && todayPlan.training_type !== "off") {
+    // Today's load taxes the recovery score based on session intensity.
+    // Applied at 50 % here — the other 50 % is reflected through the
+    // training subscore that the DailyEntry already captures.
+    todayDelta += Math.round((RECOVERY_LOAD_MODIFIER[todayPlan.intensity] ?? -5) * 0.5);
+    // Game day carries an additional systemic stress tax (travel, contact, adrenaline)
     if (todayPlan.training_type === "game") todayDelta -= 5;
   }
 
   if (tomorrowPlan) {
-    // Tomorrow's demand signals whether to conserve or expend today
+    // Tomorrow's demand is a predictive signal: hard day ahead → conserve today
     if (tomorrowPlan.training_type === "game" || tomorrowPlan.intensity === "high") {
-      tomorrowDelta = -3;  // conserve — hard day ahead
+      tomorrowDelta = -5;   // conserve — hard day ahead (spec: -5)
     } else if (tomorrowPlan.training_type === "recovery" || tomorrowPlan.training_type === "off") {
-      tomorrowDelta = +2;  // recover freely — easy day ahead
+      tomorrowDelta = +2;   // recover freely — easy day ahead
     }
   }
 
