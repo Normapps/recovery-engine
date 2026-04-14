@@ -97,18 +97,31 @@ export async function POST(req: NextRequest) {
     rawText = await file.text();
   } else if (fileName.endsWith(".pdf") || mimeType === "application/pdf") {
     try {
-      // pdf-parse v2 uses a class-based API (PDFParse) with { data: Buffer }
-      // Dynamic import avoids webpack bundling issues in Next.js App Router
-      const { PDFParse } = await import("pdf-parse");
+      // pdf-parse v1 — classic function API: pdf(buffer) → { text, numpages, ... }
+      // Require via lib path to avoid Next.js test-environment trigger in index.js
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const pdf = require("pdf-parse/lib/pdf-parse") as (
+        buffer: Buffer
+      ) => Promise<{ text: string; numpages: number }>;
+
       const buffer = Buffer.from(await file.arrayBuffer());
-      const parser = new PDFParse({ data: buffer });
-      const result = await parser.getText();
-      await parser.destroy();
-      rawText = result.text;
+      const data   = await pdf(buffer);
+      const text   = data.text;
+
+      console.log("[parse-training-plan] Extracted PDF text:", text.slice(0, 500));
+
+      if (!text.trim()) {
+        return NextResponse.json(
+          { error: "Unable to read PDF. Please upload a text-based PDF." },
+          { status: 422 }
+        );
+      }
+
+      rawText = text;
     } catch (err) {
       console.error("[parse-training-plan] PDF extraction failed:", err);
       return NextResponse.json(
-        { error: "Failed to read PDF. Try exporting as CSV and uploading that instead." },
+        { error: "Unable to read PDF. Please upload a text-based PDF." },
         { status: 422 }
       );
     }
