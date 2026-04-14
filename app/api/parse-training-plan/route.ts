@@ -97,13 +97,13 @@ export async function POST(req: NextRequest) {
     rawText = await file.text();
   } else if (fileName.endsWith(".pdf") || mimeType === "application/pdf") {
     try {
-      // Use the direct-path import to avoid Next.js test-environment mock
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const pdfParse = require("pdf-parse/lib/pdf-parse.js") as (
-        buffer: Buffer
-      ) => Promise<{ text: string }>;
+      // pdf-parse v2 uses a class-based API (PDFParse) with { data: Buffer }
+      // Dynamic import avoids webpack bundling issues in Next.js App Router
+      const { PDFParse } = await import("pdf-parse");
       const buffer = Buffer.from(await file.arrayBuffer());
-      const result = await pdfParse(buffer);
+      const parser = new PDFParse({ data: buffer });
+      const result = await parser.getText();
+      await parser.destroy();
       rawText = result.text;
     } catch (err) {
       console.error("[parse-training-plan] PDF extraction failed:", err);
