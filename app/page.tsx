@@ -548,29 +548,34 @@ function AINutritionModal({
   );
 }
 
-// ─── Execution toast ─────────────────────────────────────────────────────────
+// ─── Execution overlay ────────────────────────────────────────────────────────
+
+// Timing constants (ms) — shared between component and hook
+const EXEC_FADE_IN  = 400;
+const EXEC_HOLD     = 1400;
+const EXEC_FADE_OUT = 600;
+const EXEC_TOTAL    = EXEC_FADE_IN + EXEC_HOLD + EXEC_FADE_OUT;
 
 /**
- * ExecutionToast
+ * ExecutionOverlay
  *
- * Renders "You executed today." as a brief, self-dismissing overlay message.
+ * Centered fixed overlay that appears when the athlete completes every task
+ * in Today's Plan. No background blocking — pointer-events-none throughout.
  *
  * Lifecycle:
- *   visible=true → fade-in (300 ms) → hold (1 200 ms) → fade-out (500 ms) → hidden
+ *   visible=true → scale+fade in (400 ms) → hold (1 400 ms) → scale+fade out (600 ms)
  *
- * The parent is responsible for the once-per-day gate (see useExecutionToast).
+ * The once-per-day gate lives in useExecutionToast (unchanged).
  */
 function ExecutionToast({ visible }: { visible: boolean }) {
   const [phase, setPhase] = useState<"hidden" | "in" | "hold" | "out">("hidden");
 
   useEffect(() => {
     if (!visible) return;
-
     setPhase("in");
-    const holdTimer = setTimeout(() => setPhase("hold"), 300);
-    const outTimer  = setTimeout(() => setPhase("out"),  300 + 1200);
-    const hideTimer = setTimeout(() => setPhase("hidden"), 300 + 1200 + 500);
-
+    const holdTimer = setTimeout(() => setPhase("hold"), EXEC_FADE_IN);
+    const outTimer  = setTimeout(() => setPhase("out"),  EXEC_FADE_IN + EXEC_HOLD);
+    const hideTimer = setTimeout(() => setPhase("hidden"), EXEC_TOTAL);
     return () => {
       clearTimeout(holdTimer);
       clearTimeout(outTimer);
@@ -580,18 +585,31 @@ function ExecutionToast({ visible }: { visible: boolean }) {
 
   if (phase === "hidden") return null;
 
-  const opacity =
-    phase === "in"   ? "opacity-0 animate-[fadeIn_300ms_ease_forwards]"  :
-    phase === "hold" ? "opacity-100"                                       :
-                       "opacity-0 transition-opacity duration-500 ease-out";
+  const animClass =
+    phase === "in"   ? `animate-[executionIn_${EXEC_FADE_IN}ms_cubic-bezier(0.34,1.2,0.64,1)_forwards]` :
+    phase === "hold" ? ""                                                                                   :
+                       `animate-[executionOut_${EXEC_FADE_OUT}ms_ease-in_forwards]`;
 
   return (
     <div
       aria-live="polite"
-      className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-50 pointer-events-none ${opacity}`}
+      className={`fixed top-1/2 left-1/2 z-50 pointer-events-none ${animClass}`}
+      style={{ transform: "translate(-50%, -50%)" }}
     >
-      <div className="bg-emerald-950/90 border border-emerald-500/25 backdrop-blur-sm rounded-xl px-5 py-2.5 shadow-lg">
-        <p className="text-xs font-semibold text-emerald-300 tracking-wide whitespace-nowrap">
+      <div className="flex flex-col items-center gap-3 px-10 py-8">
+        {/* Checkmark with glow */}
+        <div
+          className="w-14 h-14 rounded-full border border-emerald-500/40 bg-emerald-950/60 backdrop-blur-sm flex items-center justify-center"
+          style={{ boxShadow: "0 0 24px 4px rgba(52,211,153,0.25), 0 0 6px 1px rgba(52,211,153,0.4)" }}
+        >
+          <Check size={26} strokeWidth={2.5} className="text-emerald-400" />
+        </div>
+
+        {/* Label */}
+        <p
+          className="text-sm font-semibold text-emerald-300 tracking-widest uppercase whitespace-nowrap"
+          style={{ textShadow: "0 0 12px rgba(52,211,153,0.5)" }}
+        >
           You executed today.
         </p>
       </div>
@@ -602,28 +620,25 @@ function ExecutionToast({ visible }: { visible: boolean }) {
 /**
  * useExecutionToast
  *
- * Watches the plan-task list and fires the toast exactly once per calendar day
- * the moment all tasks are completed.
+ * Watches the plan-task list and fires the overlay exactly once per calendar
+ * day the moment all tasks are completed.
  *
  * @param tasks   Current day's PlanTaskItem array (empty array = no-op)
  * @param dateKey YYYY-MM-DD key for today — resets the gate on a new day
  */
 function useExecutionToast(tasks: PlanTaskItem[], dateKey: string): boolean {
-  const [toastVisible, setToastVisible]       = useState(false);
-  // Tracks the date on which the toast has already fired to prevent re-trigger
+  const [toastVisible, setToastVisible] = useState(false);
   const firedDateRef = React.useRef<string | null>(null);
 
   useEffect(() => {
-    if (tasks.length === 0) return;                          // no tasks yet
-    if (firedDateRef.current === dateKey) return;            // already fired today
-    const allDone = tasks.every((t) => t.completed);
-    if (!allDone) return;
+    if (tasks.length === 0) return;
+    if (firedDateRef.current === dateKey) return;
+    if (!tasks.every((t) => t.completed)) return;
 
     firedDateRef.current = dateKey;
     setToastVisible(true);
 
-    // Reset flag after animation completes so component stays clean
-    const reset = setTimeout(() => setToastVisible(false), 300 + 1200 + 500 + 100);
+    const reset = setTimeout(() => setToastVisible(false), EXEC_TOTAL + 100);
     return () => clearTimeout(reset);
   }, [tasks, dateKey]);
 
