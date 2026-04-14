@@ -240,25 +240,24 @@ function PlanUploader({
     setErrorMsg("");
 
     try {
-      const body = new FormData();
-      body.append("file", file);
+      const formData = new FormData();
+      formData.append("file", file);
 
-      const res = await fetch("/api/parse-training-plan", {
+      const res = await fetch("/api/upload-training", {
         method: "POST",
-        body,
+        body: formData,
       });
 
-      const json = await res.json();
+      const data = await res.json();
+      console.log("UPLOAD RESPONSE:", data);
 
-      if (!res.ok) {
-        throw new Error(json.error ?? "Upload failed.");
+      if (!res.ok || !data.success) {
+        throw new Error(data.error ?? "Upload failed.");
       }
 
-      if (!Array.isArray(json.days) || json.days.length === 0) {
-        throw new Error("No training days could be extracted.");
-      }
-
-      onParsed(json.days as TrainingDay[]);
+      // Upload confirmed — file received and buffer valid.
+      // Parsing will be wired in the next step.
+      setUploadState("idle");
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Something went wrong.";
       setErrorMsg(msg);
