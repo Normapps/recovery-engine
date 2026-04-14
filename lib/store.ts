@@ -114,7 +114,7 @@ export const useStore = create<AppState>()(
     }),
     {
       name: "recovery-engine-store",
-      version: 3,
+      version: 4,
       migrate: (persistedState: unknown, version: number) => {
         const state = persistedState as Record<string, unknown>;
         if (version < 2) {
@@ -123,6 +123,10 @@ export const useStore = create<AppState>()(
         }
         if (version < 3) {
           // planTaskLog added in v3 — initialise to empty
+          return { ...state, planTaskLog: {} };
+        }
+        if (version < 4) {
+          // Reset plan task completion state so fresh checkboxes render
           return { ...state, planTaskLog: {} };
         }
         return state;
