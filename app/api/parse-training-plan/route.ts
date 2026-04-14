@@ -33,15 +33,16 @@ function cleanText(raw: string): string {
     .trim();
 }
 
-// ─── Validation helpers ────────────────────────────────────────────────────────
+// ─── Constants ────────────────────────────────────────────────────────────────
 const WEEK_DAYS: WeekDay[] = [
   "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday",
 ];
-const VALID_TYPES    = new Set<string>(["strength","practice","game","recovery","cardio","off"]);
-const VALID_INTENSITY = new Set<string>(["low","moderate","high"]);
-const VALID_UNITS    = new Set<string>(["mi","km"]);
 
-function clampInt(v: unknown, max = 300): number {
+const VALID_TYPES     = new Set<TrainingType>(["strength","practice","game","recovery","cardio","off"]);
+const VALID_INTENSITY = new Set<IntensityLevel>(["low","moderate","high"]);
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function clampInt(v: unknown, max = 600): number {
   const n = typeof v === "number" ? v : parseInt(String(v ?? 0), 10);
   return isNaN(n) ? 0 : Math.min(Math.max(n, 0), max);
 }
@@ -52,33 +53,85 @@ function clampFloat(v: unknown): number | undefined {
   return isNaN(n) || n <= 0 ? undefined : Math.min(n, 9999);
 }
 
-function validateDay(raw: unknown): TrainingDay | null {
+// Map Claude's richer "type" / "category" strings onto our TrainingType enum.
+function resolveTrainingType(
+  type: string,
+  category: string,
+): TrainingType {
+  const t = type.toLowerCase().trim();
+  const c = category.toLowerCase().trim();
+
+  if (["off", "rest", "none"].includes(t))             return "off";
+  if (["game", "race", "competition", "match"].includes(t)) return "game";
+  if (["practice", "drill", "skills", "training"].includes(t)) return "practice";
+  if (["recovery", "easy", "yoga", "mobility", "stretch", "walk"].includes(t)) return "recovery";
+  if (["strength", "lift", "weights", "gym"].includes(t)) return "strength";
+  if (["run","bike","swim","row","cardio","cycle","cross-train","hike"].includes(t)) return "cardio";
+
+  // Fall through to category
+  if (c === "cardio")   return "cardio";
+  if (c === "strength") return "strength";
+  if (c === "sport")    return "practice";
+  if (c === "recovery") return "recovery";
+
+  return "off";
+}
+
+// Validate + map one entry from Claude's richer schedule format → TrainingDay.
+function validateEntry(raw: unknown): TrainingDay | null {
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Record<string, unknown>;
 
-  const day           = String(r.day ?? "");
-  const training_type = String(r.training_type ?? "");
-  const intensity     = String(r.intensity ?? "");
+  const day = String(r.day ?? "").trim();
+  if (!WEEK_DAYS.includes(day as WeekDay)) return null;
 
-  if (!WEEK_DAYS.includes(day as WeekDay))     return null;
-  if (!VALID_TYPES.has(training_type))         return null;
-  if (!VALID_INTENSITY.has(intensity))         return null;
+  const rawIntensity = String(r.intensity ?? "").toLowerCase().trim();
+  const intensity: IntensityLevel = VALID_INTENSITY.has(rawIntensity as IntensityLevel)
+    ? (rawIntensity as IntensityLevel)
+    : "low";
 
-  const distance     = clampFloat(r.distance);
-  const rawUnit      = typeof r.distanceUnit === "string" ? r.distanceUnit.toLowerCase() : null;
-  const distanceUnit = rawUnit && VALID_UNITS.has(rawUnit)
-    ? (rawUnit as "mi" | "km")
-    : (distance !== undefined ? "mi" : undefined);
+  // Resolve training_type from Claude's "type" + "category" fields
+  const rawType     = String(r.type     ?? r.training_type ?? "off");
+  const rawCategory = String(r.category ?? "");
+  const training_type = resolveTrainingType(rawType, rawCategory);
+
+  // Validate it's in our enum (resolveTrainingType always returns a valid value,
+  // but guard for future safety)
+  if (!VALID_TYPES.has(training_type)) return null;
+
+  // duration_minutes (new field) takes priority over legacy duration
+  const duration = clampInt(r.duration_minutes ?? r.duration);
+
+  // distance_miles (new field) is already normalised; fall back to distance field
+  const distance = clampFloat(r.distance_miles ?? r.distance);
+  const distanceUnit: "mi" | "km" | undefined =
+    r.distance_miles !== undefined && r.distance_miles !== null
+      ? "mi"
+      : typeof r.distanceUnit === "string" && r.distanceUnit.toLowerCase() === "km"
+        ? "km"
+        : distance !== undefined ? "mi" : undefined;
+
   const subtype = typeof r.subtype === "string" && r.subtype.trim()
     ? r.subtype.trim() : undefined;
 
+  // Carry date/time into notes if present (not in TrainingDay schema, but useful)
+  const datePart = r.date ? String(r.date) : null;
+  const timePart = r.time ? String(r.time) : null;
+  const notesRaw = r.notes ? String(r.notes) : null;
+  const notesParts = [
+    datePart && `Date: ${datePart}`,
+    timePart && `Time: ${timePart}`,
+    notesRaw,
+  ].filter(Boolean);
+  const notes = notesParts.length ? notesParts.join(" | ") : undefined;
+
   return {
     day:           day as WeekDay,
-    training_type: training_type as TrainingType,
-    duration:      clampInt(r.duration),
-    intensity:     intensity as IntensityLevel,
-    ...(r.notes    ? { notes: String(r.notes) }   : {}),
-    ...(subtype    ? { subtype }                   : {}),
+    training_type,
+    duration,
+    intensity,
+    ...(notes      ? { notes }       : {}),
+    ...(subtype    ? { subtype }     : {}),
     ...(distance   !== undefined ? { distance }    : {}),
     ...(distanceUnit             ? { distanceUnit } : {}),
   };
@@ -95,75 +148,120 @@ function fillMissingDays(days: TrainingDay[]): TrainingDay[] {
   return all;
 }
 
-// ─── Robust JSON array extractor ─────────────────────────────────────────────
-// Claude sometimes wraps JSON in explanation text or markdown.
-// This finds the first [...] block regardless of surrounding content.
-function extractJSONArray(text: string): unknown[] {
-  // Strip markdown fences
+// ─── Robust JSON extractor ───────────────────────────────────────────────────
+// Claude sometimes wraps the response in explanation text or markdown fences.
+// We try: strip fences → direct parse → find outermost { } (object) → find [ ] (array).
+function extractClaudeJSON(text: string): { sport?: string; schedule?: unknown[]; rawArray?: unknown[] } {
   const stripped = text
-    .replace(/^```(?:json)?\r?\n?/m, "")
-    .replace(/\r?\n?```$/m, "")
+    .replace(/```(?:json)?\r?\n?/g, "")
+    .replace(/\r?\n?```/g, "")
     .trim();
 
-  // Try direct parse first
+  // Try direct parse as object { sport, schedule }
   try {
     const parsed = JSON.parse(stripped);
-    if (Array.isArray(parsed)) return parsed;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return { sport: String(parsed.sport ?? ""), schedule: Array.isArray(parsed.schedule) ? parsed.schedule : [] };
+    }
+    if (Array.isArray(parsed)) return { rawArray: parsed };
   } catch { /* fall through */ }
 
-  // Find the outermost [...] block
-  const start = stripped.indexOf("[");
-  const end   = stripped.lastIndexOf("]");
-  if (start !== -1 && end > start) {
-    const arr = JSON.parse(stripped.slice(start, end + 1));
-    if (Array.isArray(arr)) return arr;
+  // Find outermost { ... }
+  const objStart = stripped.indexOf("{");
+  const objEnd   = stripped.lastIndexOf("}");
+  if (objStart !== -1 && objEnd > objStart) {
+    try {
+      const parsed = JSON.parse(stripped.slice(objStart, objEnd + 1));
+      if (parsed && !Array.isArray(parsed)) {
+        return { sport: String(parsed.sport ?? ""), schedule: Array.isArray(parsed.schedule) ? parsed.schedule : [] };
+      }
+    } catch { /* fall through */ }
   }
 
-  throw new Error("No JSON array found in Claude response");
+  // Find outermost [ ... ]
+  const arrStart = stripped.indexOf("[");
+  const arrEnd   = stripped.lastIndexOf("]");
+  if (arrStart !== -1 && arrEnd > arrStart) {
+    const arr = JSON.parse(stripped.slice(arrStart, arrEnd + 1));
+    if (Array.isArray(arr)) return { rawArray: arr };
+  }
+
+  throw new Error("No JSON found in Claude response");
+}
+
+// ─── Sport detection ──────────────────────────────────────────────────────────
+function normaliseSport(raw: string | undefined): string {
+  if (!raw) return "running";
+  const s = raw.toLowerCase();
+  if (s.includes("soccer") || s.includes("football"))  return "soccer";
+  if (s.includes("cycling") || s.includes("bike"))     return "cycling";
+  if (s.includes("swim"))                               return "swimming";
+  if (s.includes("strength") || s.includes("lifting")) return "strength";
+  if (s.includes("triathlon") || s.includes("hybrid")) return "hybrid";
+  if (s.includes("running") || s.includes("marathon") || s.includes("run")) return "running";
+  return s.trim() || "running";
 }
 
 // ─── Claude prompt ─────────────────────────────────────────────────────────────
 function buildPrompt(text: string, today: string): string {
   return `You are an expert training plan parser for athletes. Today's date is ${today}.
 
-Analyse the training document below and extract ONE week of training — the current week if dates are visible, otherwise the first full week in the document.
+Analyse the training document below and:
+1. Identify the primary sport
+2. Extract ONE week of training — the current week if dates are visible, otherwise the first full week
 
-The document may be:
-- A multi-week marathon or race training plan (tables, columns, or lists)
-- A weekly team practice schedule
-- A strength and conditioning program
-- A mix of running, cross-training, and rest days
+The document may be a multi-week marathon/race plan, team practice schedule, strength program, or mixed plan.
 
-Return ONLY a valid JSON array of exactly 7 objects (Monday through Sunday). No markdown, no explanation, no extra text — just the raw JSON array.
+Return ONLY a valid JSON object (no markdown, no explanation):
+{
+  "sport": "<one of: running, cycling, swimming, soccer, strength, triathlon, hybrid>",
+  "schedule": [
+    {
+      "day":            "<Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday>",
+      "date":           "<YYYY-MM-DD or null>",
+      "time":           "<HH:MM or null>",
+      "type":           "<Run|Strength|Game|Practice|Recovery|Off>",
+      "subtype":        "<Long Run|Tempo Run|Easy Run|Intervals|Hill Run|Fartlek|Full Body|Upper Body|Yoga|null>",
+      "category":       "<cardio|strength|sport|recovery>",
+      "duration_minutes": <integer or null>,
+      "distance_miles": <number or null>,
+      "intensity":      "<low|moderate|high>"
+    }
+  ]
+}
 
-Each object requires these fields:
-  "day"          — one of: "Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"
-  "training_type"— one of: "strength","practice","game","recovery","cardio","off"
-                   • Run/Bike/Swim/Row/Cardio → "cardio"
-                   • Weights/Gym/Lift → "strength"
-                   • Team practice/Drill/Skills → "practice"
-                   • Race/Competition/Game/Match → "game"
-                   • Easy/Yoga/Stretch/Mobility/Active recovery → "recovery"
-                   • Rest/Off/Nothing → "off"
-  "duration"     — integer minutes (estimate if not stated; 0 for rest days)
-                   typical defaults: easy run 30-45, long run 90-120, tempo 45-60,
-                   strength 45-60, practice 75-90, game 120, recovery 30
-  "intensity"    — one of: "low","moderate","high"
-                   • Easy/recovery run/jog/yoga/walk → "low"
-                   • Tempo/threshold/long run/moderate effort/practice → "moderate"
-                   • Intervals/speed work/race/heavy lift/game → "high"
+Sport detection keywords:
+- running/marathon/5K/10K/half → "running"
+- cycling/bike/criterium → "cycling"
+- swimming/swim → "swimming"
+- soccer/football → "soccer"
+- weights/lifting/powerlifting → "strength"
+- triathlon/ironman → "triathlon"
+- mixed/cross-training → "hybrid"
 
-Optional fields (include when the document has this info):
-  "subtype"      — specific session label, e.g. "Long Run","Tempo Run","Intervals",
-                   "Easy Run","Hill Run","Fartlek","Full Body","Upper Body","Yoga"
-  "distance"     — numeric value (miles or km)
-  "distanceUnit" — "mi" or "km"
+Type rules:
+- Run/Bike/Swim/Row → "Run" (category: "cardio")
+- Weights/Gym/Lift → "Strength" (category: "strength")
+- Team practice/Drill/Skills → "Practice" (category: "sport")
+- Race/Game/Competition → "Game" (category: "sport")
+- Easy jog/Yoga/Stretch/Mobility → "Recovery" (category: "recovery")
+- Rest/Off/Nothing → "Off" (category: "recovery")
+
+Intensity rules:
+- Easy/jog/walk/yoga/active recovery → "low"
+- Tempo/threshold/long run/practice/moderate → "moderate"
+- Intervals/speed/race/heavy lift/game → "high"
+
+Duration defaults (use when not stated):
+- Easy run: 35 min | Tempo run: 50 min | Long run: 105 min
+- Intervals: 55 min | Strength: 50 min | Practice: 80 min | Game: 120 min | Recovery: 30 min | Off: 0
 
 Rules:
-- ALL 7 days must be present. Days with no session → training_type "off", duration 0, intensity "low"
-- If the document is a multi-week plan, extract the FIRST week or the week matching today's date
-- If a day lists multiple sessions, pick the primary one
-- Return ONLY the JSON array — no other text
+- ALL 7 days must appear in schedule. Missing days → type "Off", duration_minutes 0, intensity "low"
+- Multi-week plan: extract FIRST week or the week matching today's date (${today})
+- Multiple sessions on one day: pick the primary (longer/harder) session
+- distance_miles: always convert to miles (1 km = 0.621 mi); null if unknown
+- Return ONLY the JSON object — no other text
 
 Document:
 ${text.slice(0, 12000)}`;
@@ -267,9 +365,14 @@ export async function POST(req: NextRequest) {
 
   // 5. Parse and validate Claude's JSON
   try {
-    const rawArray  = extractJSONArray(claudeRaw);
-    const validDays = rawArray
-      .map(validateDay)
+    const parsed    = extractClaudeJSON(claudeRaw);
+    const rawItems  = parsed.schedule ?? parsed.rawArray ?? [];
+    const sport     = normaliseSport(parsed.sport);
+
+    console.log("[claude] Detected sport:", sport, "| Raw entries:", rawItems.length);
+
+    const validDays = rawItems
+      .map(validateEntry)
       .filter((d): d is TrainingDay => d !== null);
 
     if (validDays.length === 0) {
@@ -278,8 +381,8 @@ export async function POST(req: NextRequest) {
     }
 
     const allDays = fillMissingDays(validDays);
-    console.log("[result] Returning", allDays.length, "days");
-    return NextResponse.json({ days: allDays });
+    console.log("[result] sport:", sport, "| days:", allDays.length);
+    return NextResponse.json({ sport, days: allDays });
 
   } catch (err) {
     console.error("[claude] Parse error:", err, "\nRaw:", claudeRaw);
