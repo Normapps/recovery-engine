@@ -65,6 +65,11 @@
 import type { DailyEntry, BloodworkPanel, TrainingDay, IntensityLevel } from "./types";
 import type { RecoveryZone } from "./final-scorer";
 import { clamp } from "./normalization";
+import {
+  computeComplianceModifier,
+  type ComplianceTaskInput,
+  type ComplianceResult,
+} from "./compliance-engine";
 import { computeRecoveryStateAdjustments } from "./recovery-state";
 import { computeLoadStressResult }          from "./load-stress";
 import { computeFinalRecoveryScore, getFinalZone } from "./final-scorer";
@@ -76,6 +81,100 @@ import {
   interpretFromBreakdown,
   type InterpretationOutput,
 } from "./interpretation-engine";
+
+// ─── Readiness score ──────────────────────────────────────────────────────────
+
+/**
+ * Four-tier zone for the Readiness Score.
+ *
+ * Distinct from RecoveryZone — readiness reflects ability to perform today,
+ * not internal physiological state.
+ *
+ * // UI TODO: surface readiness_zone as a secondary badge or progress bar
+ * //          alongside the recovery ring once the design is ready.
+ */
+export type ReadinessZone = "high" | "ready" | "limited" | "not_ready";
+
+/** Internal input shape for computeReadinessScore — not exported. */
+interface ReadinessInput {
+  recovery_score:      number;  // 0–100 base
+  load_today_score:    number;  // 0–100 (sessionLoadAU → normalised)
+  load_tomorrow_score: number;  // 0–100 (tomorrowPlan AU → normalised)
+  injury: {
+    active:   boolean;
+    severity: number;  // 1–5; only used when active = true
+    soreness: number;  // 1–5; applied independently of injury.active
+  };
+  trends: {
+    hrv_trend:   "up" | "stable" | "down";
+    sleep_trend: "stable" | "volatile";
+  };
+}
+
+/**
+ * Compute the Readiness Score from a structured input.
+ *
+ * Readiness represents the athlete's capacity to perform today — distinct from
+ * Recovery Score, which reflects internal physiological state.
+ *
+ * Deduction / bonus sources (in application order):
+ *   1. Load stress  — combined today (60%) + tomorrow (40%) load
+ *   2. Injury       — active injury severity and present soreness
+ *   3. Trend signal — HRV direction and sleep consistency
+ *
+ * All deductions and bonuses operate on the recovery_score baseline.
+ * Result is clamped to [0, 100] and assigned a four-tier zone.
+ */
+function computeReadinessScore(input: ReadinessInput): {
+  readiness_score: number;
+  readiness_zone:  ReadinessZone;
+} {
+  let readiness = input.recovery_score;
+
+  // ── Step 2: Load stress (largest factor) ──────────────────────────────────
+  const combined_load =
+    input.load_today_score * 0.6 + input.load_tomorrow_score * 0.4;
+
+  if      (combined_load > 75) readiness -= 25;
+  else if (combined_load > 50) readiness -= 15;
+  else if (combined_load > 30) readiness -= 8;
+  else                         readiness -= 3;
+
+  // ── Step 3a: Injury severity (conditional on injury.active) ───────────────
+  if (input.injury.active) {
+    const sev = input.injury.severity;
+    if      (sev >= 4) readiness -= 20;
+    else if (sev === 3) readiness -= 10;
+    else               readiness -= 5;  // severity 1–2
+  }
+
+  // ── Step 3b: Soreness (always applied, regardless of injury.active) ───────
+  //   1–2 → mild     → -3
+  //   3   → moderate → -6
+  //   4–5 → high     → -10
+  const sor = input.injury.soreness;
+  if      (sor >= 4) readiness -= 10;
+  else if (sor >= 3) readiness -= 6;
+  else if (sor >= 1) readiness -= 3;
+
+  // ── Step 4: Trend bonus/penalty ───────────────────────────────────────────
+  if      (input.trends.hrv_trend === "up")       readiness += 5;
+  else if (input.trends.hrv_trend === "down")     readiness -= 8;
+
+  if      (input.trends.sleep_trend === "stable")   readiness += 3;
+  else if (input.trends.sleep_trend === "volatile") readiness -= 5;
+
+  // ── Step 5: Clamp ─────────────────────────────────────────────────────────
+  const readiness_score = Math.max(0, Math.min(100, Math.round(readiness)));
+
+  // ── Step 6: Zone ──────────────────────────────────────────────────────────
+  const readiness_zone: ReadinessZone =
+    readiness_score >= 85 ? "high"      :
+    readiness_score >= 70 ? "ready"     :
+    readiness_score >= 50 ? "limited"   : "not_ready";
+
+  return { readiness_score, readiness_zone };
+}
 
 // ─── Output contract ──────────────────────────────────────────────────────────
 
@@ -165,6 +264,90 @@ export interface ScoringPipelineOutput {
    * No numbers or percentages are ever included in these strings.
    */
   interpretation: InterpretationOutput;
+
+  /**
+   * Readiness score (0–100) — the athlete's ability to perform TODAY.
+   *
+   * Distinct from recovery_score:
+   *   recovery_score   = internal physiological state (how recovered the body is)
+   *   readiness_score  = ability to perform (recovery minus load, injury, and trend risk)
+   *
+   * Computed by computeReadinessScore() in this file (Stage 7).
+   * Inputs: recovery_score, today + tomorrow load, soreness, HRV trend, sleep trend.
+   *
+   * // UI TODO: surface readiness_score as a secondary metric — e.g. a smaller
+   * //          sub-ring, a badge, or a row in the Score Breakdown section —
+   * //          once the design direction for readiness display is confirmed.
+   */
+  readiness_score: number;
+
+  /**
+   * Four-tier zone derived from readiness_score:
+   *   "high"      ≥ 85 — peak performance window
+   *   "ready"     70–84 — good to train at planned intensity
+   *   "limited"   50–69 — reduce load or modify session
+   *   "not_ready" < 50  — avoid structured training; prioritise recovery
+   */
+  readiness_zone: ReadinessZone;
+
+  /**
+   * Compliance metrics derived from yesterday's plan-task completion.
+   *
+   *   compliance_score    — 0–100; percentage of yesterday's tasks completed
+   *   compliance_modifier — −8 | 0 | +5; applied to both recovery and readiness
+   *
+   * compliance_score = 100 and compliance_modifier = 0 when no tasks were
+   * logged yesterday (neutral — no penalty for missing data).
+   */
+  compliance: ComplianceResult;
+}
+
+// ─── Dashboard readiness helper (exported) ───────────────────────────────────
+
+/**
+ * Compute readiness using data that is already available on the dashboard
+ * without running the full pipeline (no history required).
+ *
+ * Called by DashboardContent in app/page.tsx alongside the stored
+ * recovery_score so both rings can be rendered without an extra store round-trip.
+ *
+ * @param recovery_score      Display score (0–100, psych-delta already applied)
+ * @param load_today_score    Today's session load normalised to 0–100
+ * @param load_tomorrow_score Tomorrow's planned load normalised to 0–100
+ * @param soreness            Derived soreness level from unifiedInput
+ * @param hrv_score           breakdown.hrv subscore (0–100)
+ * @param sleep_quality       1–5 from todayEntry, null = unknown (treated as neutral)
+ */
+export function computeDashboardReadiness(params: {
+  recovery_score:      number;
+  load_today_score:    number;
+  load_tomorrow_score: number;
+  soreness:            "low" | "moderate" | "high";
+  hrv_score:           number;
+  sleep_quality:       number | null;
+}): { readiness_score: number; readiness_zone: ReadinessZone } {
+  const sorenessToNum: Record<"low" | "moderate" | "high", number> = {
+    low: 1, moderate: 3, high: 5,
+  };
+
+  const hrv_trend: "up" | "stable" | "down" =
+    params.hrv_score >= 70 ? "up" :
+    params.hrv_score < 45  ? "down" : "stable";
+
+  const sleep_trend: "stable" | "volatile" =
+    (params.sleep_quality ?? 3) >= 3 ? "stable" : "volatile";
+
+  return computeReadinessScore({
+    recovery_score:      params.recovery_score,
+    load_today_score:    params.load_today_score,
+    load_tomorrow_score: params.load_tomorrow_score,
+    injury: {
+      active:   false,
+      severity: 0,
+      soreness: sorenessToNum[params.soreness],
+    },
+    trends: { hrv_trend, sleep_trend },
+  });
 }
 
 // ─── Stage 2 helper — Recovery State → 0–100 subscore ────────────────────────
@@ -268,20 +451,23 @@ function deriveSessionLoadAU(
  * All intermediate data is discarded; only the final ScoringPipelineOutput
  * is returned.
  *
- * @param entry        Today's logged DailyEntry (required)
- * @param history      Prior entries, most-recent first (enables Stages 2 & 3)
- * @param bwPanel      Latest bloodwork panel (Stage 4 modifier, ±12 pts)
- * @param todayPlan    Planned training for today  (Stage 4 & 5 context)
- * @param tomorrowPlan Planned training for tomorrow (Stage 4 & 5 context)
- * @param moodRating   Optional 1–5 mood rating from moodLog (null = unknown → neutral)
+ * @param entry          Today's logged DailyEntry (required)
+ * @param history        Prior entries, most-recent first (enables Stages 2 & 3)
+ * @param bwPanel        Latest bloodwork panel (Stage 4 modifier, ±12 pts)
+ * @param todayPlan      Planned training for today  (Stage 4 & 5 context)
+ * @param tomorrowPlan   Planned training for tomorrow (Stage 4 & 5 context)
+ * @param moodRating     Optional 1–5 mood rating from moodLog (null = unknown → neutral)
+ * @param yesterdayTasks Yesterday's plan-task checklist for compliance calculation.
+ *                       Pass an empty array or omit to treat as neutral (modifier = 0).
  */
 export function runScoringPipeline(
-  entry:         DailyEntry,
-  history:       DailyEntry[]      = [],
-  bwPanel?:      BloodworkPanel | null,
-  todayPlan?:    TrainingDay | null,
-  tomorrowPlan?: TrainingDay | null,
-  moodRating?:   number | null,
+  entry:           DailyEntry,
+  history:         DailyEntry[]           = [],
+  bwPanel?:        BloodworkPanel | null,
+  todayPlan?:      TrainingDay | null,
+  tomorrowPlan?:   TrainingDay | null,
+  moodRating?:     number | null,
+  yesterdayTasks?: ComplianceTaskInput[],
 ): ScoringPipelineOutput {
 
   // ── Stage 2: Recovery State ──────────────────────────────────────────────
@@ -357,9 +543,90 @@ export function runScoringPipeline(
     sessionLoadAU,
   );
 
+  // ── Stage 7: Readiness Score ─────────────────────────────────────────────
+  // Derives the athlete's ability to perform TODAY from recovery_score plus
+  // load, injury, and short-term trend signals.
+  //
+  // load_today_score / load_tomorrow_score: AU normalised via soft cap at
+  // 600 AU (≈ 90 min high-intensity = max stress).  Scores above 600 clamp
+  // to 100 rather than exceeding it.
+  //
+  // Soreness: mapped from the SorenessLevel derived by buildUnifiedInput():
+  //   "low"      → 1 (mild deduction:    -3)
+  //   "moderate" → 3 (moderate deduction: -6)
+  //   "high"     → 5 (high deduction:    -10)
+  //
+  // Injury: no injury store yet; injury.active = false, severity = 0.
+  //   // BACKEND TODO: when an injury store is added, pass real values here.
+  //   //   injury_active   ← injuryStore.active
+  //   //   injury_severity ← injuryStore.severity  (1–5)
+  //
+  // HRV trend: derived from breakdown.hrv subscore (same thresholds as
+  //   buildUnifiedInput for consistency).
+  //
+  // Sleep trend: derived from sleepAdj — a negative sleep adjustment of
+  //   more than 3 pts signals sleep volatility or compounding debt.
+  const AU_SOFT_CAP = 600;
+  const load_today_score    = Math.min(100, Math.round((sessionLoadAU / AU_SOFT_CAP) * 100));
+
+  const tomorrowLoadAU =
+    tomorrowPlan && tomorrowPlan.training_type !== "off" && tomorrowPlan.duration > 0
+      ? tomorrowPlan.duration * INTENSITY_AU_MULTIPLIER[tomorrowPlan.intensity]
+      : 0;
+  const load_tomorrow_score = Math.min(100, Math.round((tomorrowLoadAU / AU_SOFT_CAP) * 100));
+
+  const sorenessToNum: Record<typeof unifiedInput.soreness, number> = {
+    low: 1, moderate: 3, high: 5,
+  };
+
+  const hrv_trend: "up" | "stable" | "down" =
+    finalScore.breakdown.hrv >= 70 ? "up" :
+    finalScore.breakdown.hrv < 45  ? "down" : "stable";
+
+  const sleep_trend: "stable" | "volatile" = sleepAdj >= -3 ? "stable" : "volatile";
+
+  const { readiness_score: rawReadinessScore, readiness_zone: rawReadinessZone } =
+    computeReadinessScore({
+      recovery_score,
+      load_today_score,
+      load_tomorrow_score,
+      injury: {
+        active:   false,
+        severity: 0,
+        soreness: sorenessToNum[unifiedInput.soreness],
+      },
+      trends: { hrv_trend, sleep_trend },
+    });
+
+  // ── Stage 8: Compliance modifier ─────────────────────────────────────────
+  //
+  // Yesterday's plan-task completion is factored in as a behavioural signal.
+  // Athletes who follow their prescribed protocol recover better; those who
+  // skip multiple pillars carry a measurable (though modest) penalty.
+  //
+  // Modifier range: −8 … +5 pts.  Applied after all physiological stages so
+  // it nudges but never overrides the biological signal.
+  //
+  // When no tasks were logged yesterday, computeComplianceModifier() returns
+  // modifier = 0 (neutral) so the pipeline remains stable without task data.
+  const compliance = computeComplianceModifier(yesterdayTasks ?? []);
+  const { compliance_modifier } = compliance;
+
+  const recovery_score_final  = clamp(recovery_score  + compliance_modifier, 0, 100);
+  const readiness_score_final = clamp(rawReadinessScore + compliance_modifier, 0, 100);
+
+  // Re-derive zone from the compliance-adjusted recovery score
+  const zone_final = getFinalZone(recovery_score_final);
+
+  // Re-derive readiness zone from the compliance-adjusted readiness score
+  const readiness_zone_final: ReadinessZone =
+    readiness_score_final >= 85 ? "high"      :
+    readiness_score_final >= 70 ? "ready"     :
+    readiness_score_final >= 50 ? "limited"   : "not_ready";
+
   return {
-    recovery_score,
-    zone,
+    recovery_score:  recovery_score_final,
+    zone:            zone_final,
     recommendations: unified.recommendations,
     breakdown: {
       recovery_state,
@@ -367,5 +634,8 @@ export function runScoringPipeline(
       injury_impact,
     },
     interpretation,
+    readiness_score: readiness_score_final,
+    readiness_zone:  readiness_zone_final,
+    compliance,
   };
 }
