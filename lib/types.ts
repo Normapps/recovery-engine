@@ -377,9 +377,6 @@ export interface DailyTaskCompletion {
   rehab_completed:      boolean;  // only meaningful when injury is active
 }
 
-/** XP awarded per completed task. */
-export const TASK_XP = 25;
-
 // ─── Performance Profile ─────────────────────────────────────────────────────
 
 export const PERFORMANCE_GOALS = [

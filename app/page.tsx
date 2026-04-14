@@ -20,7 +20,7 @@ import {
   type ModalityRecommendation,
 } from "@/lib/modality-recommendations";
 import { upsertDailyCheckin, upsertTaskCompletion, upsertPlanTasks } from "@/lib/supabase";
-import { type DailyTaskCompletion, TASK_XP, type PlanTaskItem, type PlanCategory } from "@/lib/types";
+import { type DailyTaskCompletion, type PlanTaskItem, type PlanCategory } from "@/lib/types";
 import { generateDailyPlan, type DailyPlan } from "@/lib/daily-plan";
 import { generatePlanDetails, type PlanSection, type NutritionSection, type PlanDetails } from "@/lib/plan-details";
 import {
@@ -583,13 +583,6 @@ function CompletedTasksCard({
     rehab_completed:     false,
   };
 
-  const completedCount = TASK_ROWS
-    .filter(({ key, always }) => always || showRehab)
-    .filter(({ key }) => state[key])
-    .length;
-
-  const totalXP = completedCount * TASK_XP;
-
   const visibleRows = TASK_ROWS.filter(({ always }) => always || showRehab);
 
   return (
@@ -599,11 +592,6 @@ function CompletedTasksCard({
         <p className="text-xs font-bold text-text-muted uppercase tracking-widest">
           Daily Tasks
         </p>
-        {totalXP > 0 && (
-          <span className="text-2xs font-bold text-gold tabular-nums">
-            +{totalXP} XP
-          </span>
-        )}
       </div>
 
       {/* Task rows */}
@@ -643,10 +631,6 @@ function CompletedTasksCard({
                   {label}
                 </span>
 
-                {/* XP badge */}
-                <span className="ml-auto text-2xs font-bold tabular-nums text-text-muted">
-                  +{TASK_XP} XP
-                </span>
               </div>
             </button>
           </div>
