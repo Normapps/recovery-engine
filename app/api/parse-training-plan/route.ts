@@ -5,9 +5,8 @@ import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import type { TrainingDay, WeekDay, TrainingType, IntensityLevel } from "@/lib/types";
 
-const client = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
+// Client is intentionally created inside the POST handler so the API key
+// guard fires before the SDK constructor runs.
 
 // ─── PDF text extraction ──────────────────────────────────────────────────────
 // Uses pdf-parse v1 (battle-tested CJS library).
@@ -224,12 +223,23 @@ export async function POST(req: NextRequest) {
   }
 
   // 4. Send to Claude
+  // Debug: log whether the key loaded from .env.local
+  console.log("ENV KEY:", process.env.ANTHROPIC_API_KEY
+    ? `sk-ant-...${process.env.ANTHROPIC_API_KEY.slice(-4)}`
+    : undefined);
+
   if (!process.env.ANTHROPIC_API_KEY) {
+    console.error("❌ ANTHROPIC_API_KEY NOT FOUND");
     return NextResponse.json(
       { error: "Server misconfiguration: missing ANTHROPIC_API_KEY." },
       { status: 500 }
     );
   }
+
+  // Create client here (inside handler) so the guard above runs first.
+  const client = new Anthropic({
+    apiKey: process.env.ANTHROPIC_API_KEY,
+  });
 
   const today  = new Date().toISOString().split("T")[0];
   const prompt = buildPrompt(rawText, today);
