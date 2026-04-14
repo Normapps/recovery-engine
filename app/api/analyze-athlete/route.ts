@@ -20,9 +20,10 @@
 export const runtime = "nodejs";
 
 import { NextRequest, NextResponse } from "next/server";
-import { getAthlete }               from "@/lib/api/getAthlete";
-import { insertRecoveryScore }      from "@/lib/api/recoveryScores";
-import { supabaseClient }           from "@/lib/supabaseClient";
+import { getAthlete }                          from "@/lib/api/getAthlete";
+import { fetchAthleteContext, type ProfileData } from "@/lib/api/fetchAthleteContext";
+import { insertRecoveryScore }                 from "@/lib/api/recoveryScores";
+import { supabaseClient }                      from "@/lib/supabaseClient";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -342,35 +343,51 @@ Return ONLY valid JSON. No markdown, no text outside the object:
 
 // ─── Profile block ────────────────────────────────────────────────────────────
 
-function buildProfileBlock(athleteData: Record<string, unknown>, date: string): string {
-  const profile       = (athleteData.performance_profile ?? {}) as Record<string, unknown>;
-  const sport         = (profile.primaryGoal    as string) ?? "General Fitness";
-  const position      = (profile.position       as string) ?? null;
-  const priority      = (profile.priority       as string) ?? "Performance";
-  const focus         = (profile.trainingFocus  as string) ?? "Hybrid";
-  const weeklyHours   = profile.weeklyHours     as number | null;
-  const bodyWeightLbs = profile.bodyWeightLbs   as number | null;
-  const eventDate     = profile.eventDate       as string | null;
+function buildProfileBlock(profile: ProfileData | null, date: string): string {
+  if (!profile) return "Athlete Profile:\n  (no profile saved yet)";
 
+  const sport     = profile.primary_goal    ?? "General Fitness";
+  const position  = profile.position        ?? null;
+  const priority  = profile.priority        ?? "Performance";
+  const focus     = profile.training_focus  ?? "Hybrid";
+  const eventDate = profile.event_date      ?? null;
+
+  // Event countdown
   let eventLine = "";
   if (eventDate) {
     const days = Math.ceil(
       (new Date(eventDate + "T12:00:00").getTime() - new Date(date + "T12:00:00").getTime()) / 86400000
     );
     eventLine =
-      days <= 0  ? `Event: ${eventDate} (past)` :
-      days <= 7  ? `RACE WEEK — ${days} days to event` :
-      days <= 21 ? `TAPER — ${days} days to event` :
-                   `Next event: ${days} days out (${eventDate})`;
+      days <= 0  ? `${profile.event_type ?? "Event"}: ${eventDate} (past)` :
+      days <= 7  ? `RACE WEEK — ${days} days to ${profile.event_type ?? "event"}` :
+      days <= 21 ? `TAPER — ${days} days to ${profile.event_type ?? "event"}` :
+                   `Next event: ${profile.event_type ?? "event"} in ${days} days (${eventDate})`;
+  }
+
+  // Injury summary
+  let injuryLine = "";
+  if (profile.injury_active) {
+    const part     = profile.injury_body_part ?? "unspecified area";
+    const severity = profile.injury_severity  != null ? ` severity ${profile.injury_severity}/5` : "";
+    const notes    = profile.injury_notes      ? ` — ${profile.injury_notes}` : "";
+    injuryLine = `Active injury: ${part}${severity}${notes}`;
   }
 
   return [
-    "ATHLETE PROFILE",
-    `  Sport:    ${sport}${position ? ` · ${position}` : ""}`,
-    `  Priority: ${priority} · ${focus}`,
-    weeklyHours    ? `  Volume:   ${weeklyHours} hrs/week` : "",
-    bodyWeightLbs  ? `  Weight:   ${bodyWeightLbs} lbs`   : "",
-    eventLine      ? `  ${eventLine}`                      : "",
+    "Athlete Profile:",
+    `  Sport:                ${sport}${position ? ` · ${position}` : ""}`,
+    `  Goal type:            ${sport}`,
+    `  Priority:             ${priority} · ${focus}`,
+    `  Age:                  ${profile.age             != null ? `${profile.age} yrs`               : "not set"}`,
+    `  Sex:                  ${profile.sex             ?? "not set"}`,
+    `  Experience level:     ${profile.experience_level ?? "not set"}`,
+    `  Training days/week:   ${profile.training_days_per_week != null ? profile.training_days_per_week : "not set"}`,
+    `  Training hours/week:  ${profile.weekly_hours    != null ? `${profile.weekly_hours}h`           : "not set"}`,
+    `  Training intensity:   ${profile.training_intensity     ?? "not set"}`,
+    profile.body_weight_lbs != null ? `  Body weight:          ${profile.body_weight_lbs} lbs` : "",
+    injuryLine ? `  Injury:               ${injuryLine}` : "  Injury:               none",
+    eventLine  ? `  Event:                ${eventLine}`  : "",
   ].filter(Boolean).join("\n");
 }
 
@@ -394,18 +411,18 @@ function buildMetricsBlock(m: RawMetrics, bd: ScoreBreakdown): string {
 // ─── Claude call ──────────────────────────────────────────────────────────────
 
 async function callClaudeNarrative(
-  athleteData: Record<string, unknown>,
-  m:           RawMetrics,
-  bd:          ScoreBreakdown,
-  anchors:     ComputedAnchors,
-  date:        string,
+  profile:  ProfileData | null,
+  m:        RawMetrics,
+  bd:       ScoreBreakdown,
+  anchors:  ComputedAnchors,
+  date:     string,
 ): Promise<ClaudeNarrativeResult> {
   const apiKey = process.env.ANTHROPIC_API_KEY ?? process.env.CLAUDE_API_KEY ?? "";
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set.");
 
-  const profile    = buildProfileBlock(athleteData, date);
+  const profileBlk = buildProfileBlock(profile, date);
   const metricsBlk = buildMetricsBlock(m, bd);
-  const userPrompt = `${profile}\n\n${metricsBlk}`;
+  const userPrompt = `${profileBlk}\n\nDaily Metrics:\n${metricsBlk.replace(/^DAILY METRICS\n/, "")}`;
 
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -469,8 +486,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     if (!athleteResult.success)
       return NextResponse.json({ error: athleteResult.error.message }, { status: 404 });
 
-    // ── Step 2: Fetch today's entry ──────────────────────────────────────────
-    const dailyEntry = await fetchTodayEntry(userId, date);
+    // ── Step 2: Fetch today's entry + full profile (concurrent) ─────────────
+    const [dailyEntry, contextResult] = await Promise.all([
+      fetchTodayEntry(userId, date),
+      fetchAthleteContext(userId, date),
+    ]);
+    // Full profile includes all expanded columns (age, sex, training load, injury, event).
+    // Falls back to null gracefully — scoring and DB logic are unaffected.
+    const fullProfile = contextResult.success ? contextResult.data.profile : null;
 
     // ── Step 3: Compute anchors deterministically ────────────────────────────
     const m       = extractMetrics(dailyEntry);
@@ -484,10 +507,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     };
 
     // ── Step 4: Ask Claude for narrative only ────────────────────────────────
-    const narrative = await callClaudeNarrative(
-      athleteResult.data as unknown as Record<string, unknown>,
-      m, bd, anchors, date,
-    );
+    const narrative = await callClaudeNarrative(fullProfile, m, bd, anchors, date);
 
     // ── Step 5: Assemble final result — numbers are ours, language is Claude's ─
     const final = {
