@@ -561,13 +561,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       limiting_factor: narrative.limiting_factor,
     };
 
-    // ── Step 6: Save to Supabase ─────────────────────────────────────────────
+    // ── Step 6: Save to Supabase — all v2 fields ────────────────────────────
     const saveResult = await insertRecoveryScore({
       user_id:         userId,
       date,
       score:           final.score,
       recommendations: final.recommendations as unknown as Parameters<typeof insertRecoveryScore>[0]["recommendations"],
+      // v2 AI narrative fields
+      readiness_level: final.readiness_level,
+      limiting_factor: final.limiting_factor,
+      insight:         final.insight,
+      breakdown:       final.breakdown,
+      // Metadata
       confidence:      dailyEntry ? "High" : "Low",
+      data_completeness: dailyEntry ? 1.0 : 0.0,
     });
 
     if (!saveResult.success)

@@ -38,16 +38,32 @@ function noClient(): ApiResult<never> {
 
 // ─── 1. INSERT RECOVERY SCORE ─────────────────────────────────────────────────
 
+/** Breakdown stored as JSONB — mirrors ScoreBreakdown from the scoring engine. */
+export interface ScoreBreakdownPayload {
+  sleep:         number;   // 0–100
+  hrv:           number;   // 0–100
+  training_load: number;   // 0–100
+  nutrition:     number;   // 0–100
+}
+
 export interface InsertRecoveryScoreInput {
   user_id:         string;
   date:            string;           // YYYY-MM-DD
   score:           number;           // 0–100  → stored as calculated_score
   recommendations: ModalityRecommendation[];
 
-  // Optional — subscores and metadata
+  // v2 AI narrative fields (from analyze-athlete Claude pipeline)
+  readiness_level?: "low" | "moderate" | "high" | null;
+  limiting_factor?: string | null;   // Claude-written sentence
+  insight?:         string | null;   // Claude-written 1–2 sentence narrative
+  breakdown?:       ScoreBreakdownPayload | null;  // JSONB: { sleep, hrv, training_load, nutrition }
+
+  // Optional metadata
   adjusted_score?:     number | null;
   confidence?:         "Low" | "Medium" | "High";
   data_completeness?:  number;        // 0–1
+
+  // Flat subscores (kept for backward compat; prefer breakdown JSONB for new code)
   score_sleep?:        number;
   score_hrv?:          number;
   score_training?:     number;
@@ -57,22 +73,28 @@ export interface InsertRecoveryScoreInput {
 }
 
 export interface RecoveryScoreRow {
-  id:               string;
-  user_id:          string;
-  date:             string;
-  calculated_score: number;
-  adjusted_score:   number | null;
-  confidence:       string;
+  id:                string;
+  user_id:           string;
+  date:              string;
+  // v2 canonical names
+  calculated_score:  number;
+  adjusted_score:    number | null;
+  readiness_level:   "low" | "moderate" | "high" | null;
+  limiting_factor:   string | null;
+  insight:           string | null;
+  breakdown:         ScoreBreakdownPayload | null;
+  confidence:        string;
   data_completeness: number | null;
-  recommendations:  ModalityRecommendation[];
-  score_sleep:      number | null;
-  score_hrv:        number | null;
-  score_training:   number | null;
-  score_nutrition:  number | null;
-  score_modalities: number | null;
-  score_bloodwork:  number | null;
-  created_at:       string;
-  updated_at:       string;
+  recommendations:   ModalityRecommendation[];
+  // Flat subscores (legacy)
+  score_sleep:       number | null;
+  score_hrv:         number | null;
+  score_training:    number | null;
+  score_nutrition:   number | null;
+  score_modalities:  number | null;
+  score_bloodwork:   number | null;
+  created_at:        string;
+  updated_at:        string;
 }
 
 /**
@@ -105,18 +127,28 @@ export async function insertRecoveryScore(
     return inputError("recommendations must be an array.");
 
   // ── Build row ─────────────────────────────────────────────────────────────
+  const score = Math.round(input.score);
   const row = {
     user_id:           input.user_id,
     date:              input.date,
-    calculated_score:  Math.round(input.score),
-    adjusted_score:    input.adjusted_score   ?? null,
-    confidence:        input.confidence       ?? "Medium",
+    // Score
+    calculated_score:  score,
+    adjusted_score:    input.adjusted_score    ?? null,
+    // v2 AI narrative fields
+    readiness_level:   input.readiness_level   ??
+      (score >= 85 ? "high" : score >= 70 ? "moderate" : "low"),
+    limiting_factor:   input.limiting_factor   ?? null,
+    insight:           input.insight           ?? null,
+    breakdown:         input.breakdown         ?? null,
+    // Metadata
+    confidence:        input.confidence        ?? "Medium",
     data_completeness: input.data_completeness ?? null,
     recommendations:   input.recommendations,
-    score_sleep:       input.score_sleep      ?? null,
-    score_hrv:         input.score_hrv        ?? null,
-    score_training:    input.score_training   ?? null,
-    score_nutrition:   input.score_nutrition  ?? null,
+    // Flat subscores (legacy — also mirror from breakdown when provided)
+    score_sleep:       input.score_sleep    ?? input.breakdown?.sleep    ?? null,
+    score_hrv:         input.score_hrv      ?? input.breakdown?.hrv      ?? null,
+    score_training:    input.score_training ?? input.breakdown?.training_load ?? null,
+    score_nutrition:   input.score_nutrition ?? input.breakdown?.nutrition ?? null,
     score_modalities:  input.score_modalities ?? null,
     score_bloodwork:   input.score_bloodwork  ?? null,
   };
