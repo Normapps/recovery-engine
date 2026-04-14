@@ -19,8 +19,8 @@ import {
   buildUnifiedInput,
   type ModalityRecommendation,
 } from "@/lib/modality-recommendations";
-import { upsertDailyCheckin, upsertTaskCompletion, upsertPlanTasks } from "@/lib/supabase";
-import { type DailyTaskCompletion, type PlanTaskItem, type PlanCategory } from "@/lib/types";
+import { upsertDailyCheckin, upsertPlanTasks } from "@/lib/supabase";
+import { type PlanTaskItem, type PlanCategory } from "@/lib/types";
 import { generateDailyPlan, type DailyPlan } from "@/lib/daily-plan";
 import { generatePlanDetails, type PlanSection, type NutritionSection, type PlanDetails } from "@/lib/plan-details";
 import {
@@ -548,98 +548,6 @@ function AINutritionModal({
   );
 }
 
-// ─── Completed Tasks card ────────────────────────────────────────────────
-
-type TaskKey = keyof Omit<DailyTaskCompletion, "date">;
-
-const TASK_ROWS: Array<{
-  key:     TaskKey;
-  label:   string;
-  icon:    React.ReactNode;
-  always?: true;
-}> = [
-  { key: "training_completed",  label: "Training",  icon: <Dumbbell   size={13} />, always: true },
-  { key: "recovery_completed",  label: "Recovery",  icon: <Zap        size={13} />, always: true },
-  { key: "nutrition_completed", label: "Nutrition", icon: <Utensils   size={13} />, always: true },
-  { key: "rehab_completed",     label: "Rehab",     icon: <TrendingUp size={13} /> },
-];
-
-function CompletedTasksCard({
-  date,
-  tasks,
-  showRehab,
-  onToggle,
-}: {
-  date:      string;
-  tasks:     DailyTaskCompletion | null;
-  showRehab: boolean;
-  onToggle:  (task: TaskKey) => void;
-}) {
-  const state: DailyTaskCompletion = tasks ?? {
-    date,
-    training_completed:  false,
-    recovery_completed:  false,
-    nutrition_completed: false,
-    rehab_completed:     false,
-  };
-
-  const visibleRows = TASK_ROWS.filter(({ always }) => always || showRehab);
-
-  return (
-    <div className="bg-bg-card border border-bg-border rounded-2xl p-4 flex flex-col gap-3">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <p className="text-xs font-bold text-text-muted uppercase tracking-widest">
-          Daily Tasks
-        </p>
-      </div>
-
-      {/* Task rows */}
-      {visibleRows.map(({ key, label, icon }, i) => {
-        const done = state[key];
-        return (
-          <div key={key}>
-            {i > 0 && <div className="h-px bg-bg-border mb-3" />}
-            <button
-              className="w-full text-left"
-              onClick={() => onToggle(key)}
-              aria-pressed={done}
-            >
-              <div className="flex items-center gap-3">
-                {/* Checkbox circle */}
-                <div
-                  className={`h-5 w-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-all ${
-                    done
-                      ? "border-green-500 bg-green-500/20"
-                      : "border-bg-border bg-transparent"
-                  }`}
-                >
-                  {done && <Check size={10} className="text-green-400" strokeWidth={3} />}
-                </div>
-
-                {/* Icon + label */}
-                <span
-                  className={`text-text-muted transition-colors ${done ? "text-green-400/70" : ""}`}
-                >
-                  {icon}
-                </span>
-                <span
-                  className={`text-xs font-semibold uppercase tracking-wider transition-colors ${
-                    done ? "text-green-400 line-through decoration-green-400/40" : "text-text-secondary"
-                  }`}
-                >
-                  {label}
-                </span>
-
-              </div>
-            </button>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 // ─── Execution toast ─────────────────────────────────────────────────────────
 
 /**
@@ -950,32 +858,7 @@ function DashboardContent({
   onMoodChange:  (v: number) => void;
 }) {
   const { breakdown, confidence } = todayScore;
-
-  // ── Daily tasks ───────────────────────────────────────────────────────────
-  const taskLog    = useStore((s) => s.taskLog);
-  const toggleTask = useStore((s) => s.toggleTask);
-  const dateKey    = todayScore.date; // YYYY-MM-DD
-  const todayTasks = taskLog[dateKey] ?? null;
-
-  const handleToggleTask = (task: TaskKey) => {
-    toggleTask(dateKey, task);
-    // Compute optimistic updated state for Supabase (the store update is async)
-    const base: DailyTaskCompletion = todayTasks ?? {
-      date:                dateKey,
-      training_completed:  false,
-      recovery_completed:  false,
-      nutrition_completed: false,
-      rehab_completed:     false,
-    };
-    const updated = { ...base, [task]: !base[task] };
-    upsertTaskCompletion(
-      dateKey,
-      updated.training_completed,
-      updated.recovery_completed,
-      updated.nutrition_completed,
-      updated.rehab_completed,
-    );
-  };
+  const dateKey = todayScore.date; // YYYY-MM-DD
 
   // ── Plan task checklist ───────────────────────────────────────────────────
   const planTaskLog    = useStore((s) => s.planTaskLog);
@@ -1198,14 +1081,6 @@ function DashboardContent({
         details={planDetails}
         tasks={storedPlanTasks ?? []}
         onToggle={handleTogglePlanTask}
-      />
-
-      {/* ── Daily Tasks ─────────────────────────────────────────────────── */}
-      <CompletedTasksCard
-        date={dateKey}
-        tasks={todayTasks}
-        showRehab={false}
-        onToggle={handleToggleTask}
       />
 
       {/* ── Score breakdown ─────────────────────────────────────────────── */}
