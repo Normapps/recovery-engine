@@ -155,27 +155,27 @@ function pick(id: string, reason: string): ModalityRecommendation {
 export function getRecommendation(modalityName: string): string {
   switch (modalityName) {
     case "Ice Bath":
-      return "Submerge legs to the waist for 10 minutes to reduce quad and hamstring inflammation.";
+      return "10 minutes of cold water flushes inflammation out of your legs — you'll be back to full training capacity 24 hours faster than passive rest alone.";
     case "Compression Boots":
-      return "Strap on compression boots for 25 minutes to push blood back up from your calves.";
+      return "25 minutes in compression boots pumps recovery fluid through your legs — you'll wake up tomorrow with noticeably less soreness and more spring in your step.";
     case "Active Recovery":
-      return "Walk or cycle lightly for 20 minutes to clear lactate without stressing your legs.";
+      return "20 minutes of easy movement accelerates lactate clearance — your legs will feel fresher for tomorrow's session than if you rest completely.";
     case "Myofascial Release":
-      return "Foam roll quads, hamstrings, and calves, pausing 15 seconds on each sore spot.";
+      return "12 minutes rolling out the tight spots breaks up tissue adhesions — you'll have more range of motion and less pain in your very next session.";
     case "Foam Rolling":
-      return "Roll quads, IT band, and upper back for 90 seconds per area to restore tissue length.";
+      return "12 minutes of foam rolling restores tissue length and reduces next-day stiffness — your first reps tomorrow will feel significantly smoother and more controlled.";
     case "Breathwork":
-      return "Lie on your back and use 4-4-4-4 box breathing for 10 minutes before sleep.";
+      return "10 minutes of controlled breathing drops your heart rate and cortisol — you'll fall asleep faster tonight and wake up measurably more recovered.";
     case "Sleep Protocol":
-      return "Set a target bedtime two hours earlier and keep your room cool and dark all night.";
+      return "Going to bed earlier gives your body more repair cycles — every extra hour of sleep is worth 10+ points on tomorrow's recovery score.";
     case "Sauna":
-      return "Sit in the sauna for 20 minutes at 170–190°F to trigger heat-shock protein production.";
+      return "20 minutes in the sauna triggers heat-shock proteins that repair damaged muscle tissue — you'll feel the difference in your next session and reduce injury risk over time.";
     case "Contrast Therapy":
-      return "Alternate 3 minutes hot and 1 minute cold, repeating four times from feet to hips.";
+      return "Alternating hot and cold pumps blood in and out of tired muscle tissue — you'll clear soreness up to 30% faster than passive rest alone.";
     case "Mobility Flow":
-      return "Perform 5 slow hip circles and thoracic rotations per side, holding each end range 3 seconds.";
+      return "15 minutes of mobility work restores joint range after loading — you'll move better tomorrow and lower your long-term injury risk with every session you do this.";
     default:
-      return "Follow your coach's protocol today to support structured recovery and avoid accumulated fatigue.";
+      return "Complete today's protocol — consistent recovery work compounds into higher baseline scores and better performance week over week.";
   }
 }
 
@@ -187,23 +187,23 @@ function pickCirculation(input: UnifiedInput, score: number): ModalityRecommenda
   // High load or game → prioritise circulation recovery (takes priority over psych signal)
   if (t.type === "game" || (t.intensity === "high" && score < 70)) {
     return pick("compression_boots",
-      "Strap on compression boots for 25 minutes post-session to flush lactic acid from your legs.");
+      "25 minutes in compression boots right now pushes recovery fluid through your legs — you'll start tomorrow significantly fresher and reduce soreness before it sets in.");
   }
   if (soreness === "high") {
     return pick("ice_bath",
-      "Submerge legs to the waist for 10 minutes to reduce quad and hamstring inflammation.");
+      "10 minutes of cold water right now flushes the inflammation out of your legs — you'll recover a full day faster and get back to full training capacity sooner.");
   }
   // Low psych readiness → steer toward passive, low-demand active recovery
   if (input.psych_score != null && input.psych_score <= 2) {
     return pick("active_recovery",
-      "Walk or cycle lightly for 20 minutes to clear lactate without stressing your legs.");
+      "20 minutes of easy movement clears fatigue without adding stress — your body and mind both reset faster with light activity than complete rest.");
   }
   if (score >= 75) {
     return pick("active_recovery",
-      "Walk or cycle lightly for 20 minutes to clear lactate without stressing your legs.");
+      "20 minutes of light movement keeps blood flowing without adding training load — your legs will feel ready and responsive for tomorrow's full session.");
   }
   return pick("compression_boots",
-    "Strap on compression boots for 25 minutes to push blood back up from your calves.");
+    "25 minutes in compression boots pumps recovery fluid through your legs — you'll wake up tomorrow with noticeably less soreness and more spring in your step.");
 }
 
 function pickTissueWork(input: UnifiedInput, used: Set<string>): ModalityRecommendation {
@@ -211,12 +211,14 @@ function pickTissueWork(input: UnifiedInput, used: Set<string>): ModalityRecomme
 
   // Rule: myofascial only when soreness or injury present
   if ((soreness !== "low" || injury.active) && !used.has("myofascial_release")) {
-    const area = injury.active && injury.area ? ` Spend extra time on the ${injury.area}.` : "";
+    const area = injury.active && injury.area
+      ? ` Give extra time to the ${injury.area} — consistent work here is what prevents this from becoming a longer-term setback.`
+      : "";
     return pick("myofascial_release",
-      `Foam roll quads, hamstrings, and calves, pausing 15 seconds on each sore spot.${area}`);
+      `12 minutes rolling out the tight spots breaks up tissue adhesions — you'll have more range of motion and less pain in your very next session.${area}`);
   }
   return pick("foam_rolling",
-    "Roll quads, IT band, and upper back for 90 seconds per area to restore tissue length.");
+    "12 minutes of foam rolling restores tissue length and reduces next-day stiffness — your first reps tomorrow will feel significantly smoother and more controlled.");
 }
 
 function pickNervousSystem(input: UnifiedInput, score: number, used: Set<string>): ModalityRecommendation {
@@ -226,36 +228,36 @@ function pickNervousSystem(input: UnifiedInput, score: number, used: Set<string>
   if (score < 45 || sleep_hours < 6) {
     return pick("sleep_protocol",
       sleep_hours < 6
-        ? `You logged ${sleep_hours.toFixed(1)}h — sleep eight hours tonight and stay off screens one hour before bed.`
-        : "Set a bedtime two hours earlier and keep your room below 68°F for deeper sleep tonight.");
+        ? `You logged ${sleep_hours.toFixed(1)}h last night — 8 hours tonight is worth more to your score than any supplement or protocol. Set a bedtime now and stay off screens 60 minutes before.`
+        : "Your score needs maximum repair time tonight — go to bed two hours earlier and keep your room below 68°F. You'll gain 10+ recovery points by tomorrow morning.");
   }
   // Low psych readiness → nervous system calming before HRV or score threshold
   // Uses an extended exhale (4-4-8) which is clinically more effective for acute stress
   if (input.psych_score != null && input.psych_score <= 2) {
     return pick("breathwork",
-      "Lie on your back and breathe in 4 counts, hold 4, exhale 8 — repeat for 10 minutes.");
+      "10 minutes of slow breathing resets your nervous system and lowers cortisol — you'll feel noticeably calmer within minutes and sleep deeper tonight, which shows up directly in tomorrow's score.");
   }
   // HRV declining or nervous system stressed → breathwork
   if (hrv_trend === "down" || score < 65) {
     return pick("breathwork",
-      "Lie on your back and breathe in 4 counts, hold 4, exhale 8 — repeat for 10 minutes.");
+      "10 minutes of controlled breathing lowers your heart rate and cortisol right now — you'll fall asleep faster tonight and wake up measurably more recovered tomorrow.");
   }
   return pick("breathwork",
-    "Lie on your back and use 4-4-4-4 box breathing for 10 minutes before sleep.");
+    "10 minutes of box breathing before sleep shifts your nervous system into full recovery mode — you'll get more repair done in the same hours of sleep and wake up with a higher score.");
 }
 
 // ─── Summary builder ─────────────────────────────────────────────────────────
 
 function buildSummary(input: UnifiedInput, score: number, status: RecoveryStatus): string {
   if (status === "fatigued")
-    return `Score of ${score} signals high fatigue. Prioritise sleep and passive recovery — avoid adding load.`;
+    return `Score of ${score} — your body is in repair mode. Sleep and passive recovery are your highest-leverage moves right now. Adding training load will slow you down, not speed you up.`;
   if (status === "caution")
-    return `Score of ${score} — body is under stress. Keep sessions controlled and recovery deliberate.`;
+    return `Score of ${score} — you're carrying fatigue. Keep today's session controlled and your recovery deliberate. Tonight's choices directly determine tomorrow's score.`;
   if (input.today_training.type === "game")
-    return `Game day protocol active. Prioritise circulation and nervous system recovery post-competition.`;
+    return `Game day protocol active. The work you do in the next 4 hours determines how fast you bounce back — prioritise circulation and nervous system recovery now.`;
   if (status === "optimal")
-    return `Recovery score is strong at ${score}. Focused protocol maintains your edge for tomorrow.`;
-  return `Score of ${score} — targeted protocol will keep you primed for tomorrow's training.`;
+    return `Recovery score is strong at ${score} — your body is primed and ready. Today's protocol locks in that edge and sets you up to perform at this level again tomorrow.`;
+  return `Score of ${score} — follow the protocol below and you'll be in a stronger position for tomorrow's training. Consistency is what turns a good day into a great week.`;
 }
 
 // ─── Main export ─────────────────────────────────────────────────────────────
@@ -317,12 +319,14 @@ export function buildUnifiedInput(
     breakdown.hrv >= 70 ? "up" :
     breakdown.hrv < 45  ? "down" : "flat";
 
-  // Soreness: CK from bloodwork or inferred from training load
+  // Soreness: derived from CK biomarker only.
+  // Do NOT infer from training intensity — the intensity is already captured by the
+  // readiness load-modifier (−5/−10/−20). Adding soreness on top would double-count
+  // the same signal and unfairly penalise high-intensity or game days.
   const ck = bwPanel?.creatineKinase ?? null;
   const soreness: SorenessLevel =
-    ck != null && ck > 300                    ? "high" :
-    ck != null && ck > 200                    ? "moderate" :
-    (todayPlan?.intensity === "high" || todayPlan?.training_type === "game") ? "moderate" : "low";
+    ck != null && ck > 300 ? "high" :
+    ck != null && ck > 200 ? "moderate" : "low";
 
   return {
     recovery_score_base:  baseScore,

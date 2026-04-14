@@ -106,13 +106,13 @@ function MoodPicker({
   return (
     <div className="bg-bg-card border border-bg-border rounded-2xl px-5 py-4">
       <div className="flex items-center justify-between mb-3">
-        <p className="text-xs font-bold text-text-muted uppercase tracking-widest">
+        <p className="text-xs font-bold text-text-secondary uppercase tracking-widest">
           How do you feel today?
         </p>
         <div className="flex items-center gap-1.5">
-          <span className="text-2xs text-text-muted">low</span>
-          <span className="text-2xs text-text-muted mx-1">·</span>
-          <span className="text-2xs text-text-muted">great</span>
+          <span className="text-xs text-text-secondary">low</span>
+          <span className="text-xs text-text-secondary mx-1">·</span>
+          <span className="text-xs text-text-secondary">great</span>
         </div>
       </div>
       <div className="flex items-center justify-between gap-2">
@@ -130,8 +130,8 @@ function MoodPicker({
             >
               <span className="text-xl leading-none">{MOOD_EMOJI[n - 1]}</span>
               <span
-                className={`text-2xs font-bold tabular-nums ${
-                  active ? "text-gold" : "text-text-muted"
+                className={`text-xs font-bold tabular-nums ${
+                  active ? "text-gold" : "text-text-secondary"
                 }`}
               >
                 {n}
@@ -202,7 +202,7 @@ function PlanDetailModal({
 
         {/* Overview */}
         <div>
-          <p className="text-2xs font-bold text-text-muted uppercase tracking-widest mb-1.5">Overview</p>
+          <p className="text-xs font-bold text-text-secondary uppercase tracking-widest mb-1.5">Overview</p>
           <p className="text-sm text-text-primary leading-relaxed">{section.overview}</p>
         </div>
 
@@ -210,7 +210,7 @@ function PlanDetailModal({
 
         {/* Instructions */}
         <div>
-          <p className="text-2xs font-bold text-text-muted uppercase tracking-widest mb-2.5">Instructions</p>
+          <p className="text-xs font-bold text-text-secondary uppercase tracking-widest mb-2.5">Instructions</p>
           <ul className="flex flex-col gap-2.5">
             {section.instructions.map((step, i) => (
               <li key={i} className="flex items-start gap-3">
@@ -225,7 +225,7 @@ function PlanDetailModal({
 
         {/* Structure */}
         <div>
-          <p className="text-2xs font-bold text-text-muted uppercase tracking-widest mb-1.5">Structure</p>
+          <p className="text-xs font-bold text-text-secondary uppercase tracking-widest mb-1.5">Structure</p>
           <p className="text-xs font-mono bg-bg-elevated border border-bg-border rounded-xl px-3 py-2.5 text-text-secondary leading-relaxed">
             {section.structure}
           </p>
@@ -235,7 +235,7 @@ function PlanDetailModal({
 
         {/* Coaching note */}
         <div>
-          <p className="text-2xs font-bold text-text-muted uppercase tracking-widest mb-1.5">Coach's Note</p>
+          <p className="text-xs font-bold text-text-secondary uppercase tracking-widest mb-1.5">Coach's Note</p>
           <p className="text-xs text-gold leading-relaxed">{section.coachingNote}</p>
         </div>
       </div>
@@ -280,7 +280,7 @@ function NutritionDetailModal({
 
         {/* Overview */}
         <div>
-          <p className="text-2xs font-bold text-text-muted uppercase tracking-widest mb-1.5">Overview</p>
+          <p className="text-xs font-bold text-text-secondary uppercase tracking-widest mb-1.5">Overview</p>
           <p className="text-sm text-text-primary leading-relaxed">{section.overview}</p>
         </div>
 
@@ -288,7 +288,7 @@ function NutritionDetailModal({
 
         {/* Protein */}
         <div>
-          <p className="text-2xs font-bold text-text-muted uppercase tracking-widest mb-2">Protein Target</p>
+          <p className="text-xs font-bold text-text-secondary uppercase tracking-widest mb-2">Protein Target</p>
           <div className="flex items-baseline gap-2 mb-1.5">
             <span className="text-xl font-extrabold text-gold tabular-nums">{section.protein.totalGrams}g</span>
             <span className="text-xs text-text-muted">daily · {section.protein.perMeal}g per meal</span>
@@ -308,7 +308,7 @@ function NutritionDetailModal({
 
         {/* Carbs */}
         <div>
-          <p className="text-2xs font-bold text-text-muted uppercase tracking-widest mb-2">Carbohydrates</p>
+          <p className="text-xs font-bold text-text-secondary uppercase tracking-widest mb-2">Carbohydrates</p>
           <div className="flex items-baseline gap-2 mb-1.5">
             <span className="text-xl font-extrabold text-gold tabular-nums">{section.carbs.totalGrams}g</span>
             <span className="text-xs text-text-muted">daily</span>
@@ -328,7 +328,7 @@ function NutritionDetailModal({
 
         {/* Hydration */}
         <div>
-          <p className="text-2xs font-bold text-text-muted uppercase tracking-widest mb-2">Hydration</p>
+          <p className="text-xs font-bold text-text-secondary uppercase tracking-widest mb-2">Hydration</p>
           <div className="flex items-baseline gap-2 mb-1.5">
             <span className="text-xl font-extrabold text-gold tabular-nums">{section.hydration.totalOz}oz</span>
             <span className="text-xs text-text-muted">target today</span>
@@ -341,7 +341,7 @@ function NutritionDetailModal({
           <>
             <div className="h-px bg-bg-border" />
             <div>
-              <p className="text-2xs font-bold text-text-muted uppercase tracking-widest mb-2">Micronutrients</p>
+              <p className="text-xs font-bold text-text-secondary uppercase tracking-widest mb-2">Micronutrients</p>
               <div className="flex flex-wrap gap-1.5 mb-2">
                 {section.micronutrients.focus.map((m, i) => (
                   <span key={i} className="text-2xs font-bold px-2 py-0.5 rounded-full bg-gold/10 border border-gold/20 text-gold">
@@ -358,7 +358,7 @@ function NutritionDetailModal({
 
         {/* Coaching note */}
         <div>
-          <p className="text-2xs font-bold text-text-muted uppercase tracking-widest mb-1.5">Coach's Note</p>
+          <p className="text-xs font-bold text-text-secondary uppercase tracking-widest mb-1.5">Coach's Note</p>
           <p className="text-xs text-gold leading-relaxed">{section.coachingNote}</p>
         </div>
       </div>
@@ -406,7 +406,7 @@ function AIModalShell({
 
 function AISectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <p className="text-2xs font-bold text-text-muted uppercase tracking-widest mb-1.5">
+    <p className="text-xs font-bold text-text-secondary uppercase tracking-widest mb-1.5">
       {children}
     </p>
   );
@@ -926,13 +926,21 @@ function DashboardContent({
   const todayAU    = todayPlan    && todayPlan.training_type    !== "off" ? todayPlan.duration    * AU_MULT[todayPlan.intensity]    : 0;
   const tomorrowAU = tomorrowPlan && tomorrowPlan.training_type !== "off" ? tomorrowPlan.duration * AU_MULT[tomorrowPlan.intensity] : 0;
 
-  const { readiness_score: readinessScore } = computeDashboardReadiness({
+  const {
+    readiness_score:     readinessScore,
+    readiness_breakdown: rdBreakdown,
+  } = computeDashboardReadiness({
     recovery_score:      displayScore,
     load_today_score:    Math.min(100, Math.round((todayAU    / AU_SOFT_CAP) * 100)),
     load_tomorrow_score: Math.min(100, Math.round((tomorrowAU / AU_SOFT_CAP) * 100)),
     soreness:            unifiedInput.soreness,
     hrv_score:           breakdown.hrv,
     sleep_quality:       todayEntry.sleep.qualityRating ?? null,
+    // Pass intensity directly from the training plan so the scorer uses the
+    // precise −5/−10/−20 deduction rather than the AU-based fallback.
+    intensity_today:    todayPlan    && todayPlan.training_type    !== "off" ? todayPlan.intensity    : undefined,
+    intensity_tomorrow: tomorrowPlan && tomorrowPlan.training_type !== "off" ? tomorrowPlan.intensity : undefined,
+    tomorrow_is_game:   tomorrowPlan?.training_type === "game",
   });
 
   const coachMessage   = generateCoachMessage(todayScore, coachMode);
@@ -996,11 +1004,27 @@ function DashboardContent({
     todayEntry.sleep.qualityRating ? `Quality ${todayEntry.sleep.qualityRating}/5` : null,
   ].filter(Boolean) as string[];
 
-  // ── Readiness card details ────────────────────────────────────────────
-  const readinessDetails = [
-    todayEntry.sleep.hrv       ? `HRV ${todayEntry.sleep.hrv}ms` : null,
-    todayEntry.sleep.restingHR ? `RHR ${todayEntry.sleep.restingHR}bpm` : null,
-  ].filter(Boolean) as string[];
+  // ── Readiness breakdown details ───────────────────────────────────────
+  // ── Readiness breakdown — built directly from the scorer's own deltas ────
+  // These numbers ARE the computation, not a re-derivation, so they always match.
+  const readinessDetails: string[] = [];
+  readinessDetails.push(`Base recovery: ${rdBreakdown.base}`);
+  readinessDetails.push(
+    `${rdBreakdown.load_label}: ${rdBreakdown.load >= 0 ? "+" : ""}${rdBreakdown.load}`
+  );
+  if (rdBreakdown.tomorrow !== 0)
+    readinessDetails.push(`Hard/game day tomorrow: ${rdBreakdown.tomorrow}`);
+  if (rdBreakdown.soreness !== 0)
+    readinessDetails.push(
+      `Muscle soreness: ${rdBreakdown.soreness >= 0 ? "+" : ""}${rdBreakdown.soreness}`
+    );
+  if (rdBreakdown.hrv !== 0)
+    readinessDetails.push(
+      `HRV trend: ${rdBreakdown.hrv >= 0 ? "+" : ""}${rdBreakdown.hrv}`
+    );
+  readinessDetails.push(
+    `Sleep quality: ${rdBreakdown.sleep >= 0 ? "+" : ""}${rdBreakdown.sleep}`
+  );
 
   // ── Training card details ─────────────────────────────────────────────
   const trainingDetails: string[] = [];
@@ -1100,8 +1124,8 @@ function DashboardContent({
 
       {/* ── Score breakdown ─────────────────────────────────────────────── */}
       <div>
-        <h2 className="text-xs font-bold text-text-muted uppercase tracking-widest mb-3">
-          Score Breakdown
+        <h2 className="text-xs font-bold text-text-secondary uppercase tracking-widest mb-3">
+          What's Driving Your Score
         </h2>
         <div className="grid grid-cols-2 gap-3">
           <ScoreCard
@@ -1113,8 +1137,8 @@ function DashboardContent({
           <ScoreCard
             icon={<Zap size={13} />}
             label="Readiness"
-            score={breakdown.hrv}
-            details={readinessDetails.length ? readinessDetails : ["No HRV data"]}
+            score={readinessScore}
+            details={readinessDetails}
           />
           <ScoreCard
             icon={<Dumbbell size={13} />}
@@ -1145,19 +1169,19 @@ function DashboardContent({
       {trainingPlan && (
         <div className="bg-bg-card border border-bg-border rounded-2xl p-4 flex flex-col gap-2">
           <div className="flex items-center gap-2 mb-1">
-            <Dumbbell size={13} className="text-text-muted" />
-            <span className="text-xs font-bold text-text-muted uppercase tracking-widest">
-              Training Impact
+            <Dumbbell size={13} className="text-text-secondary" />
+            <span className="text-xs font-bold text-text-secondary uppercase tracking-widest">
+              How Training Affects Your Score
             </span>
           </div>
           <div className="flex items-start justify-between gap-2">
             <div className="flex-1">
-              <p className="text-2xs text-text-muted uppercase tracking-wider mb-0.5">Today</p>
+              <p className="text-xs text-text-secondary font-medium uppercase tracking-wider mb-0.5">Today</p>
               <p className="text-xs text-text-secondary">{recSummary.today}</p>
             </div>
             {todayPlan && (
               <span
-                className="text-2xs font-bold px-2 py-0.5 rounded-full uppercase tracking-wide shrink-0"
+                className="text-xs font-bold px-2 py-0.5 rounded-full uppercase tracking-wide shrink-0"
                 style={{
                   backgroundColor: `${TYPE_COLOR[todayPlan.training_type]}20`,
                   color: TYPE_COLOR[todayPlan.training_type],
@@ -1170,12 +1194,12 @@ function DashboardContent({
           <div className="h-px bg-bg-border" />
           <div className="flex items-start justify-between gap-2">
             <div className="flex-1">
-              <p className="text-2xs text-text-muted uppercase tracking-wider mb-0.5">Tomorrow</p>
+              <p className="text-xs text-text-secondary font-medium uppercase tracking-wider mb-0.5">Tomorrow</p>
               <p className="text-xs text-text-secondary">{recSummary.tomorrow}</p>
             </div>
             {tomorrowPlan && (
               <span
-                className="text-2xs font-bold px-2 py-0.5 rounded-full uppercase tracking-wide shrink-0"
+                className="text-xs font-bold px-2 py-0.5 rounded-full uppercase tracking-wide shrink-0"
                 style={{
                   backgroundColor: `${TYPE_COLOR[tomorrowPlan.training_type]}20`,
                   color: TYPE_COLOR[tomorrowPlan.training_type],
@@ -1191,11 +1215,11 @@ function DashboardContent({
       {/* ── Recovery modalities ─────────────────────────────────────────── */}
       <div>
         <div className="flex items-center justify-between mb-1">
-          <h2 className="text-xs font-bold text-text-muted uppercase tracking-widest">
-            Recovery Modalities
+          <h2 className="text-xs font-bold text-text-secondary uppercase tracking-widest">
+            What To Do Right Now
           </h2>
           <span className="text-xs font-bold text-gold uppercase tracking-wider">
-            Coach Recommended
+            Personalized
           </span>
         </div>
         <div className="flex flex-col gap-2">

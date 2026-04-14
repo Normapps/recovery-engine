@@ -175,10 +175,10 @@ export default function SettingsPage() {
           <WeightRow label="Sleep Quality + Duration" weight={30} color="#818CF8" />
           <WeightRow label="HRV / Resting HR" weight={25} color="#22C55E" />
           <WeightRow label="Training Load Balance" weight={20} color="#F59E0B" />
-          <WeightRow label="Nutrition" weight={15} color="#C9A227" />
-          <WeightRow label="Recovery Modalities" weight={10} color="#EF4444" />
+          <WeightRow label="Nutrition" weight={20} color="#C9A227" />
+          <WeightRow label="Recovery Modalities" weight={5} color="#EF4444" />
         </div>
-        <p className="text-2xs text-text-muted mt-4 leading-relaxed">
+        <p className="text-xs text-text-secondary mt-4 leading-relaxed">
           Blood lab results (when available within 90 days) modify the final score by up to ±12 points
           based on 41 biomarkers across hormones, metabolic health, inflammation, and nutrient status.
         </p>
