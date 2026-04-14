@@ -6,7 +6,6 @@ import Link from "next/link";
 import { useStore, useLatestBloodwork } from "@/lib/store";
 import { getEffectiveScore } from "@/lib/recovery-engine";
 import { generateCoachMessage } from "@/lib/coaching";
-import { generateSeedData } from "@/lib/seed-data";
 import RecoveryScoreRing from "@/components/ui/RecoveryScoreRing";
 import ScoreOverride from "@/components/ui/ScoreOverride";
 import {
@@ -811,26 +810,14 @@ function TodaysPlanCard({
 // ─── Main Dashboard ───────────────────────────────────────────────────────
 
 export default function Dashboard() {
-  const todayScore        = useStore((s) => s.todayScore);
-  const todayEntry        = useStore((s) => s.todayEntry);
-  const coachingPrefs     = useStore((s) => s.coachingPrefs);
-  const upsertEntry       = useStore((s) => s.upsertEntry);
-  const upsertScore       = useStore((s) => s.upsertScore);
-  const scores            = useStore((s) => s.scores);
-  const trainingPlan      = useStore((s) => s.trainingPlan);
-  const moodLog           = useStore((s) => s.moodLog);
-  const setMood           = useStore((s) => s.setMood);
-  const latestBloodwork   = useLatestBloodwork(90);
+  const todayScore         = useStore((s) => s.todayScore);
+  const todayEntry         = useStore((s) => s.todayEntry);
+  const coachingPrefs      = useStore((s) => s.coachingPrefs);
+  const trainingPlan       = useStore((s) => s.trainingPlan);
+  const moodLog            = useStore((s) => s.moodLog);
+  const setMood            = useStore((s) => s.setMood);
+  const latestBloodwork    = useLatestBloodwork(90);
   const performanceProfile = useStore((s) => s.performanceProfile);
-
-  useEffect(() => {
-    if (Object.keys(scores).length === 0) {
-      const { entries, scores: seedScores } = generateSeedData();
-      Object.values(entries).forEach((e) => upsertEntry(e));
-      Object.values(seedScores).forEach((s) => upsertScore(s));
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const today    = format(new Date(), "EEEE, MMMM d").toUpperCase();
   const todayKey = format(new Date(), "yyyy-MM-dd");

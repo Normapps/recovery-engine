@@ -164,6 +164,65 @@ export async function upsertPerformanceProfile(
   return error ? { error: error.message } : {};
 }
 
+/**
+ * Persist a daily entry to Supabase (daily_entries table).
+ *
+ * Maps the frontend DailyEntry shape → snake_case DB columns.
+ * Requires a valid user_id (UUID from the users table) — no-ops in
+ * offline/localStorage mode when Supabase is not configured.
+ *
+ * NOTE: user_id must be a real UUID linked to a users row due to FK.
+ * Wire Supabase Auth first; until then, call this only when auth is present.
+ *
+ * Table: daily_entries
+ * Conflict key: (user_id, date)
+ *
+ * SQL to add missing feel columns (run migration 004):
+ *   alter table public.daily_entries
+ *     add column if not exists soreness     smallint check (soreness between 1 and 5),
+ *     add column if not exists energy_level smallint check (energy_level between 1 and 5);
+ */
+export async function upsertDailyEntry(
+  userId: string,
+  entry:  import("./types").DailyEntry,
+): Promise<void> {
+  if (!supabase) return;
+  const { error } = await supabase.from("daily_entries").upsert(
+    {
+      user_id:              userId,
+      date:                 entry.date,
+      // Sleep / HRV
+      sleep_duration:       entry.sleep.duration       ?? null,
+      sleep_quality_rating: entry.sleep.qualityRating  ?? null,
+      hrv:                  entry.sleep.hrv            ?? null,
+      resting_hr:           entry.sleep.restingHR      ?? null,
+      body_battery:         entry.sleep.bodyBattery    ?? null,
+      // Nutrition
+      calories:             entry.nutrition.calories   ?? null,
+      protein_g:            entry.nutrition.protein    ?? null,
+      hydration_oz:         entry.nutrition.hydration  ?? null,
+      nutrition_notes:      entry.nutrition.notes      ?? null,
+      // Training
+      strength_training:    entry.training.strengthTraining ?? false,
+      strength_duration:    entry.training.strengthDuration ?? null,
+      cardio:               entry.training.cardio           ?? false,
+      cardio_duration:      entry.training.cardioDuration   ?? null,
+      core_work:            entry.training.coreWork         ?? false,
+      mobility:             entry.training.mobility         ?? false,
+      // Recovery modalities
+      ice_bath:             entry.recovery?.iceBath     ?? false,
+      sauna:                entry.recovery?.sauna       ?? false,
+      compression:          entry.recovery?.compression ?? false,
+      massage:              entry.recovery?.massage     ?? false,
+      // Feel inputs (migration 004)
+      soreness:             entry.soreness     ?? null,
+      energy_level:         entry.energyLevel  ?? null,
+    },
+    { onConflict: "user_id,date" },
+  );
+  if (error) console.error("[supabase] upsertDailyEntry error:", error.message);
+}
+
 export async function upsertTrainingPlan(payload: {
   user_id:    string | null;
   sport:      string;
