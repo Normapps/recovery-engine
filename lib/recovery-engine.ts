@@ -5,8 +5,8 @@
  *   Sleep duration + quality  → 0.30
  *   HRV / resting HR          → 0.25
  *   Training load balance     → 0.20
- *   Nutrition                 → 0.15
- *   Recovery modalities       → 0.10
+ *   Nutrition                 → 0.20
+ *   Recovery modalities       → 0.05
  *
  * Raw inputs are normalized via lib/normalization.ts before scoring.
  */
@@ -41,11 +41,11 @@ import {
 // ─── Weights ──────────────────────────────────────────────────────────────────
 
 const WEIGHTS = {
-  sleep:     0.30,
-  hrv:       0.25,
-  training:  0.20,
-  nutrition: 0.15,
-  modalities: 0.10,
+  sleep:      0.30,
+  hrv:        0.25,
+  training:   0.20,
+  nutrition:  0.20,
+  modalities: 0.05,
 } as const;
 
 // ─── Sleep subscore (0–100) ───────────────────────────────────────────────────

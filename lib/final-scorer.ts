@@ -17,7 +17,7 @@
  *           │ (lib/recovery-state.ts + lib/load-stress.ts)
  *           │
  *  Stage 3 │ Weighted composite score
- *           │ sleep×0.30 + hrv×0.25 + training×0.20 + nutrition×0.15 + modalities×0.10
+ *           │ sleep×0.30 + hrv×0.25 + training×0.20 + nutrition×0.20 + modalities×0.05
  *           │ (lib/recovery-engine.ts → computeRecoveryScore)
  *           │
  *  Stage 4 │ Bloodwork modifier
@@ -73,6 +73,7 @@ interface FinalScoreInternal {
   stageDeltas: {
     bloodwork:      number;        // pts applied in Stage 4
     trainingPlan:   number;        // pts applied in Stage 5
+    accFatigue:     number;        // pts applied in Stage 5b (accumulated fatigue)
   };
 }
 
@@ -166,6 +167,27 @@ export function zoneToTier(zone: RecoveryZone): ReturnType<typeof getRecoveryTie
   return "low";
 }
 
+// ─── Stage 5b — Accumulated fatigue ──────────────────────────────────────────
+
+/**
+ * Penalise scores when the uploaded training plan contains multiple high-load days
+ * in the same week. This ensures that a soccer team with 5 high-intensity sessions
+ * sees a lower recovery score than one with 2, even if today's inputs are identical.
+ *
+ *   ≥ 5 high days → −10 pts   (heavy block — risk of overtraining)
+ *   3–4 high days → −5  pts   (significant cumulative load)
+ *   0–2 high days →  0  pts   (normal load profile)
+ */
+function applyAccumulatedFatigue(weeklySchedule?: TrainingDay[]): number {
+  if (!weeklySchedule || weeklySchedule.length === 0) return 0;
+  const highDays = weeklySchedule.filter(
+    (d) => d.training_type !== "off" && d.intensity === "high",
+  ).length;
+  if (highDays >= 5) return -10;
+  if (highDays >= 3) return -5;
+  return 0;
+}
+
 // ─── Core pipeline ────────────────────────────────────────────────────────────
 
 function runPipeline(
@@ -173,17 +195,21 @@ function runPipeline(
   bwPanel?:        BloodworkPanel | null,
   todayPlan?:      TrainingDay | null,
   tomorrowPlan?:   TrainingDay | null,
+  weeklySchedule?: TrainingDay[],
 ): FinalScoreInternal {
   const base = stageThreeScore.calculatedScore;
 
   // Stage 4 — bloodwork
   const bw = applyBloodworkStage(base, bwPanel);
 
-  // Stage 5 — training plan context
+  // Stage 5 — training plan context (today + tomorrow load)
   const tp = applyTrainingPlanStage(todayPlan, tomorrowPlan);
 
+  // Stage 5b — accumulated fatigue from the full weekly schedule
+  const accFatigue = applyAccumulatedFatigue(weeklySchedule);
+
   // Stage 6 — clamp to valid range
-  const recovery_score = clamp(base + bw.delta + tp.delta, 0, 100);
+  const recovery_score = clamp(base + bw.delta + tp.delta + accFatigue, 0, 100);
   const zone           = deriveZone(recovery_score);
 
   // Propagate bloodwork subscore into breakdown
@@ -196,7 +222,7 @@ function runPipeline(
     recovery_score,
     zone,
     breakdown,
-    stageDeltas: { bloodwork: bw.delta, trainingPlan: tp.delta },
+    stageDeltas: { bloodwork: bw.delta, trainingPlan: tp.delta, accFatigue },
   };
 }
 
@@ -212,21 +238,25 @@ function runPipeline(
  * @param entry        Today's logged DailyEntry
  * @param history      Prior entries, most-recent first (enables Recovery State)
  * @param bwPanel      Optional bloodwork panel (Stage 4 modifier)
- * @param todayPlan    Optional training plan day for today (Stage 5)
- * @param tomorrowPlan Optional training plan day for tomorrow (Stage 5)
+ * @param todayPlan       Optional training plan day for today (Stage 5)
+ * @param tomorrowPlan    Optional training plan day for tomorrow (Stage 5)
+ * @param weeklySchedule  Full weekly schedule from the active TrainingPlan (Stage 5b).
+ *                        Pass `trainingPlan?.weeklySchedule` at the call site.
+ *                        Omit for neutral behaviour — no accumulated fatigue applied.
  */
 export function computeFinalRecoveryScore(
-  entry:        DailyEntry,
-  history:      DailyEntry[]      = [],
-  bwPanel?:     BloodworkPanel | null,
-  todayPlan?:   TrainingDay | null,
-  tomorrowPlan?: TrainingDay | null,
+  entry:           DailyEntry,
+  history:         DailyEntry[]      = [],
+  bwPanel?:        BloodworkPanel | null,
+  todayPlan?:      TrainingDay | null,
+  tomorrowPlan?:   TrainingDay | null,
+  weeklySchedule?: TrainingDay[],
 ): RecoveryScore {
   // Stages 1–3: normalization + recovery state + weighted composite
   const stage3 = computeRecoveryScore(entry, history);
 
-  // Stages 4–6: bloodwork + training plan + final clamp + zone
-  const final  = runPipeline(stage3, bwPanel, todayPlan, tomorrowPlan);
+  // Stages 4–6: bloodwork + training plan + accumulated fatigue + final clamp + zone
+  const final  = runPipeline(stage3, bwPanel, todayPlan, tomorrowPlan, weeklySchedule);
 
   // Stage 7: map internal FinalScoreInternal → RecoveryScore (UI contract unchanged)
   return {

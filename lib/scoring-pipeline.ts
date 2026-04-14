@@ -100,6 +100,18 @@ import {
  */
 export type ReadinessZone = "high" | "ready" | "limited" | "not_ready";
 
+/** Per-factor breakdown of what moved the readiness score up or down. */
+export interface ReadinessBreakdown {
+  base:           number;   // recovery_score starting point
+  load:           number;   // today's session deduction (−5 / −10 / −20)
+  tomorrow:       number;   // predictive penalty (−5 or 0)
+  soreness:       number;   // soreness deduction (−3 / −6 / −10)
+  hrv:            number;   // HRV trend bonus/penalty (+5 / 0 / −8)
+  sleep:          number;   // sleep trend bonus/penalty (+3 / 0 / −5)
+  /** Human-readable label for today's load source ("Low session −5", etc.) */
+  load_label:     string;
+}
+
 /** Internal input shape for computeReadinessScore — not exported. */
 interface ReadinessInput {
   recovery_score:      number;  // 0–100 base
@@ -167,31 +179,34 @@ function computeAccumulatedFatigue(weeklySchedule?: TrainingDay[]): number {
  * Result is clamped to [0, 100] and assigned a four-tier zone.
  */
 function computeReadinessScore(input: ReadinessInput): {
-  readiness_score: number;
-  readiness_zone:  ReadinessZone;
+  readiness_score:    number;
+  readiness_zone:     ReadinessZone;
+  readiness_breakdown: ReadinessBreakdown;
 } {
   let readiness = input.recovery_score;
 
   // ── Step 2: Load stress ────────────────────────────────────────────────────
-  // Primary deduction: today's session intensity → −5 / −10 / −20.
-  // Falls back to AU-based thresholds when no intensity is available
-  // (e.g. computeDashboardReadiness called without a training plan).
+  let load_delta  = 0;
+  let load_label  = "";
   if (input.intensity_today) {
-    readiness += READINESS_LOAD_MODIFIER[input.intensity_today];
+    load_delta  = READINESS_LOAD_MODIFIER[input.intensity_today];
+    const label = input.intensity_today.charAt(0).toUpperCase() + input.intensity_today.slice(1);
+    load_label  = `${label} session`;
   } else {
     const combined_load =
       input.load_today_score * 0.6 + input.load_tomorrow_score * 0.4;
-    if      (combined_load > 75) readiness -= 25;
-    else if (combined_load > 50) readiness -= 15;
-    else if (combined_load > 30) readiness -= 8;
-    else                         readiness -= 3;
+    if      (combined_load > 75) load_delta = -25;
+    else if (combined_load > 50) load_delta = -15;
+    else if (combined_load > 30) load_delta = -8;
+    else                         load_delta = -3;
+    load_label = combined_load > 30 ? "Training load" : "Rest day";
   }
+  readiness += load_delta;
 
-  // Predictive penalty: hard or game day tomorrow → conserve today (spec: −5).
-  if (
-    input.intensity_tomorrow === "high" ||
-    input.tomorrow_is_game   === true
-  ) {
+  // Predictive penalty: hard or game day tomorrow → conserve today.
+  let tomorrow_delta = 0;
+  if (input.intensity_tomorrow === "high" || input.tomorrow_is_game === true) {
+    tomorrow_delta = -5;
     readiness -= 5;
   }
 
@@ -200,24 +215,28 @@ function computeReadinessScore(input: ReadinessInput): {
     const sev = input.injury.severity;
     if      (sev >= 4) readiness -= 20;
     else if (sev === 3) readiness -= 10;
-    else               readiness -= 5;  // severity 1–2
+    else               readiness -= 5;
   }
 
   // ── Step 3b: Soreness (always applied, regardless of injury.active) ───────
   //   1–2 → mild     → -3
   //   3   → moderate → -6
   //   4–5 → high     → -10
+  let soreness_delta = 0;
   const sor = input.injury.soreness;
-  if      (sor >= 4) readiness -= 10;
-  else if (sor >= 3) readiness -= 6;
-  else if (sor >= 1) readiness -= 3;
+  if      (sor >= 4) { soreness_delta = -10; readiness -= 10; }
+  else if (sor >= 3) { soreness_delta = -6;  readiness -= 6;  }
+  else if (sor >= 1) { soreness_delta = -3;  readiness -= 3;  }
 
   // ── Step 4: Trend bonus/penalty ───────────────────────────────────────────
-  if      (input.trends.hrv_trend === "up")       readiness += 5;
-  else if (input.trends.hrv_trend === "down")     readiness -= 8;
+  let hrv_delta   = 0;
+  let sleep_delta = 0;
 
-  if      (input.trends.sleep_trend === "stable")   readiness += 3;
-  else if (input.trends.sleep_trend === "volatile") readiness -= 5;
+  if      (input.trends.hrv_trend === "up")   { hrv_delta =  5; readiness += 5; }
+  else if (input.trends.hrv_trend === "down") { hrv_delta = -8; readiness -= 8; }
+
+  if      (input.trends.sleep_trend === "stable")   { sleep_delta =  3; readiness += 3; }
+  else if (input.trends.sleep_trend === "volatile") { sleep_delta = -5; readiness -= 5; }
 
   // ── Step 5: Clamp ─────────────────────────────────────────────────────────
   const readiness_score = Math.max(0, Math.min(100, Math.round(readiness)));
@@ -228,7 +247,17 @@ function computeReadinessScore(input: ReadinessInput): {
     readiness_score >= 70 ? "ready"     :
     readiness_score >= 50 ? "limited"   : "not_ready";
 
-  return { readiness_score, readiness_zone };
+  const readiness_breakdown: ReadinessBreakdown = {
+    base:       input.recovery_score,
+    load:       load_delta,
+    tomorrow:   tomorrow_delta,
+    soreness:   soreness_delta,
+    hrv:        hrv_delta,
+    sleep:      sleep_delta,
+    load_label,
+  };
+
+  return { readiness_score, readiness_zone, readiness_breakdown };
 }
 
 // ─── Output contract ──────────────────────────────────────────────────────────
@@ -390,13 +419,19 @@ export interface ScoringPipelineOutput {
  * @param sleep_quality       1–5 from todayEntry, null = unknown (treated as neutral)
  */
 export function computeDashboardReadiness(params: {
-  recovery_score:      number;
-  load_today_score:    number;
-  load_tomorrow_score: number;
-  soreness:            "low" | "moderate" | "high";
-  hrv_score:           number;
-  sleep_quality:       number | null;
-}): { readiness_score: number; readiness_zone: ReadinessZone } {
+  recovery_score:       number;
+  load_today_score:     number;
+  load_tomorrow_score:  number;
+  soreness:             "low" | "moderate" | "high";
+  hrv_score:            number;
+  sleep_quality:        number | null;
+  /** Intensity of today's planned session from the uploaded training plan. */
+  intensity_today?:     IntensityLevel;
+  /** Intensity of tomorrow's planned session from the uploaded training plan. */
+  intensity_tomorrow?:  IntensityLevel;
+  /** True when tomorrow is a scheduled game or race. */
+  tomorrow_is_game?:    boolean;
+}): { readiness_score: number; readiness_zone: ReadinessZone; readiness_breakdown: ReadinessBreakdown } {
   const sorenessToNum: Record<"low" | "moderate" | "high", number> = {
     low: 1, moderate: 3, high: 5,
   };
@@ -412,6 +447,11 @@ export function computeDashboardReadiness(params: {
     recovery_score:      params.recovery_score,
     load_today_score:    params.load_today_score,
     load_tomorrow_score: params.load_tomorrow_score,
+    // When the training plan provides explicit intensity, use it.
+    // This gives the more accurate −5/−10/−20 deduction rather than the AU fallback.
+    intensity_today:     params.intensity_today,
+    intensity_tomorrow:  params.intensity_tomorrow,
+    tomorrow_is_game:    params.tomorrow_is_game,
     injury: {
       active:   false,
       severity: 0,
@@ -420,6 +460,7 @@ export function computeDashboardReadiness(params: {
     trends: { hrv_trend, sleep_trend },
   });
 }
+
 
 // ─── Stage 2 helper — Recovery State → 0–100 subscore ────────────────────────
 

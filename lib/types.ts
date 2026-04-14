@@ -346,6 +346,7 @@ export interface TrainingDay {
 export interface TrainingPlan {
   id:             string;
   name:           string;
+  sport?:         string;          // detected sport from upload, e.g. "soccer", "running"
   rawInput:       string;
   weeklySchedule: TrainingDay[];
   createdAt:      string;
