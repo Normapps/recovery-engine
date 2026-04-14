@@ -1,6 +1,7 @@
 "use client";
 
 import DailyLogForm from "@/components/forms/DailyLogForm";
+import ConnectedDevices from "@/components/devices/ConnectedDevices";
 import { format } from "date-fns";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
@@ -21,9 +22,12 @@ export default function LogPage() {
         </div>
       </div>
 
+      {/* Connected devices — auto-import section */}
+      <ConnectedDevices />
+
       <p className="text-xs text-text-secondary leading-relaxed">
-        Enter your data for today. Incomplete entries will be scored with a lower confidence level.
-        You can always update this data later.
+        Enter your data below or import from a connected device above. Incomplete entries will be
+        scored with a lower confidence level.
       </p>
 
       <DailyLogForm />

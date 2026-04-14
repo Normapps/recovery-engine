@@ -345,7 +345,7 @@ function generateNutritionSection(
     return {
       _type: "nutrition",
       title:    "Today's Nutrition",
-      overview: "Replenishment is the priority today. Your body cannot repair without adequate fuel — undereating when recovery is low extends the hole you are in.",
+      overview: "Replenishment is the priority today. Your body cannot repair without adequate fuel — undereating when recovery is low extends the hole you are in. Prioritize anti-inflammatory foods including dark leafy greens alongside your protein and carbs.",
       protein: {
         totalGrams: 160,
         perMeal:    40,
@@ -362,10 +362,10 @@ function generateNutritionSection(
         schedule: "Drink 16oz immediately on waking. Carry a bottle and refill every 2 hours. Add electrolytes if urine is clear.",
       },
       micronutrients: {
-        focus: ["Magnesium", "Zinc", "Vitamin C"],
-        note:  "These three support sleep quality, immune function, and tissue repair. Spinach, pumpkin seeds, and citrus cover all three in whole-food form.",
+        focus: ["Magnesium", "Zinc", "Vitamin C", "Dark Leafy Greens"],
+        note:  "Spinach and kale supply magnesium, iron, and vitamin C simultaneously. Broccoli and brussels sprouts add sulforaphane — a compound that directly reduces exercise-induced inflammation. Pumpkin seeds cover zinc. Aim for 2–3 cups of cooked or raw greens today.",
       },
-      coachingNote: "When recovery is critically low, carbohydrates are medicine — do not restrict them today.",
+      coachingNote: "When recovery is critically low, carbohydrates are medicine — and vegetables are the micronutrient delivery system that makes them work. Do not skip either today.",
     };
   }
 
@@ -374,7 +374,7 @@ function generateNutritionSection(
     return {
       _type: "nutrition",
       title:    "Today's Nutrition",
-      overview: "What you eat directly affects how you feel mentally. Stable blood sugar, adequate protein, and omega-3 fats are the fastest dietary interventions for low mood.",
+      overview: "What you eat directly affects how you feel mentally. Stable blood sugar, adequate protein, omega-3 fats, and dark leafy greens are the fastest dietary interventions for low mood.",
       protein: {
         totalGrams: 160,
         perMeal:    40,
@@ -384,17 +384,17 @@ function generateNutritionSection(
       carbs: {
         totalGrams: 250,
         timing:     "Prioritize slow-releasing carbs to prevent energy crashes that worsen mood.",
-        foods:      ["Oats — 27g per half cup dry, steady release", "Brown rice — 45g per cup cooked", "Sweet potato — 26g, also high in B6", "Lentils — 40g per cup cooked, also high in folate", "Blueberries — 21g per cup, antioxidant-rich"],
+        foods:      ["Oats — 27g per half cup dry, steady release", "Brown rice — 45g per cup cooked", "Sweet potato — 26g, also high in B6", "Lentils — 40g per cup cooked, also high in folate", "Blueberries — 21g per cup, antioxidant-rich", "Spinach or kale — pair with any meal, negligible carbs, high mineral density"],
       },
       hydration: {
         totalOz:  80,
         schedule: "16oz on waking. Avoid caffeine after 2pm — late caffeine elevates cortisol and disrupts sleep, compounding the mood deficit.",
       },
       micronutrients: {
-        focus: ["Omega-3 (EPA + DHA)", "Magnesium", "B-Complex (B6, B12, Folate)"],
-        note:  "Omega-3 EPA reduces neuroinflammation. Magnesium supports GABA and sleep. B vitamins drive serotonin synthesis. Prioritize food first — salmon, leafy greens, and legumes cover all three.",
+        focus: ["Omega-3 (EPA + DHA)", "Magnesium", "B-Complex (B6, B12, Folate)", "Dark Leafy Greens"],
+        note:  "Omega-3 EPA reduces neuroinflammation. Magnesium supports GABA and sleep. B vitamins drive serotonin synthesis — spinach, kale, and broccoli deliver folate, magnesium, and vitamin C simultaneously. Aim for at least 2 cups of greens today alongside salmon and legumes.",
       },
-      coachingNote: "Consistent, balanced meals are the most underused mental performance tool — do not skip any today.",
+      coachingNote: "Consistent, balanced meals — including vegetables — are the most underused mental performance tool. Do not skip any eating occasion today.",
     };
   }
 
@@ -403,7 +403,7 @@ function generateNutritionSection(
     return {
       _type: "nutrition",
       title:    "Today's Nutrition",
-      overview: "Consistent fueling today stabilizes energy and gives tissues the substrate they need to recover. Skipping meals or underhydrating will push your score lower tomorrow.",
+      overview: "Consistent fueling today stabilizes energy and gives tissues the substrate they need to recover. Include dark leafy greens at two meals — their micronutrient density is the highest-value addition you can make when recovery is compromised.",
       protein: {
         totalGrams: 160,
         perMeal:    45,
@@ -413,13 +413,17 @@ function generateNutritionSection(
       carbs: {
         totalGrams: 250,
         timing:     "Distribute across all meals. If training today, prioritize carbs in the 90-minute window before and directly after.",
-        foods:      ["Rice — 45g per cup cooked", "Oats — 27g per half cup dry", "Potatoes — 37g per medium", "Bread — 30g per 2 slices", "Fruit — banana (27g), apple (25g)"],
+        foods:      ["Rice — 45g per cup cooked", "Oats — 27g per half cup dry", "Potatoes — 37g per medium", "Bread — 30g per 2 slices", "Fruit — banana (27g), apple (25g)", "Broccoli or green beans — pair with any meal as a side"],
       },
       hydration: {
         totalOz:  80,
         schedule: "16oz on waking, then 8–12oz every 1–2 hours. Your urine should be pale yellow by mid-morning.",
       },
-      coachingNote: "Protein timing matters more than total quantity alone — spread it evenly across the day for best muscle protein synthesis.",
+      micronutrients: {
+        focus: ["Magnesium", "Vitamin C", "Dark Leafy Greens"],
+        note:  "Spinach, kale, broccoli, and brussels sprouts supply magnesium, vitamin C, and folate — nutrients that directly support tissue repair and energy metabolism. Two cups of cooked or raw greens across your meals today will noticeably support recovery.",
+      },
+      coachingNote: "Protein timing and vegetable intake are the two levers that move the needle fastest at this score range — do not let either slip today.",
     };
   }
 
@@ -428,7 +432,7 @@ function generateNutritionSection(
     return {
       _type: "nutrition",
       title:    "Game Day Nutrition",
-      overview: "Every intake window today has a purpose. Pre-game fueling sets your energy ceiling; post-game intake determines how fast you recover for the next session.",
+      overview: "Every intake window today has a purpose. Pre-game fueling sets your energy ceiling; post-game intake determines how fast you recover for the next session. Include greens at your pre-game meal — their potassium and magnesium content directly reduce cramp risk.",
       protein: {
         totalGrams: 180,
         perMeal:    45,
@@ -438,17 +442,17 @@ function generateNutritionSection(
       carbs: {
         totalGrams: 380,
         timing:     "Load carbs 2–3 hours pre-game (80–100g). Sip a sports drink or fruit during if the game exceeds 60 minutes. Refuel with 60–80g post-game.",
-        foods:      ["White rice — 45g per cup, easy to digest pre-game", "Pasta — 43g per cup cooked", "White bread with honey — 30–35g fast carbs", "Banana pre-game (27g) — portable, easy", "Gatorade or similar during — 14g per 8oz"],
+        foods:      ["White rice — 45g per cup, easy to digest pre-game", "Pasta — 43g per cup cooked", "White bread with honey — 30–35g fast carbs", "Banana pre-game (27g) — portable, easy", "Gatorade or similar during — 14g per 8oz", "Steamed broccoli or spinach pre-game — keeps gut stable, adds potassium"],
       },
       hydration: {
         totalOz:  100,
         schedule: "16oz on waking. 16oz with pre-game meal. 8–16oz per hour during play. 24oz post-game immediately. Add electrolytes post-game if you sweat heavily.",
       },
       micronutrients: {
-        focus: ["Sodium", "Potassium", "Magnesium"],
-        note:  "Electrolyte loss through sweat increases cramp risk and impairs muscle contraction. Post-game electrolyte drink or salted food prevents next-day soreness.",
+        focus: ["Sodium", "Potassium", "Magnesium", "Dark Leafy Greens"],
+        note:  "Electrolyte loss through sweat increases cramp risk and impairs muscle contraction. Spinach and broccoli provide natural potassium and magnesium — pairing them with your pre-game meal gives you a mineral buffer that sports drinks alone cannot match. Post-game salted food or an electrolyte drink restores what competition took.",
       },
-      coachingNote: "Fuel every window today — you cannot out-compete poor game-day nutrition.",
+      coachingNote: "Fuel every window today — you cannot out-compete poor game-day nutrition. Greens at your pre-game meal are one of the most overlooked cramp-prevention strategies.",
     };
   }
 
@@ -457,7 +461,7 @@ function generateNutritionSection(
     return {
       _type: "nutrition",
       title:    "Today's Nutrition",
-      overview: "High recovery opens the door to high performance output. Fuel to match the intensity you are capable of — every intake window matters on a day like today.",
+      overview: "High recovery opens the door to high performance output. Fuel to match the intensity you are capable of — every intake window matters on a day like today. Include dark leafy greens at your evening meal to prime tomorrow's recovery from today's hard session.",
       protein: {
         totalGrams: 180,
         perMeal:    45,
@@ -467,17 +471,17 @@ function generateNutritionSection(
       carbs: {
         totalGrams: 350,
         timing:     "Pre-training (90 min out): 60–80g. Intra-training if session exceeds 75 min: 30–45g per hour. Post-training (within 30 min): 60–80g. Evening meal: 60–80g to restore glycogen for tomorrow.",
-        foods:      ["White rice — fast-digesting, ideal pre and post", "Oats + banana — pre-training combination", "Sweet potato — 26g, ideal evening carb with high micronutrient density", "Pasta — 43g per cup, good pre-training loading", "Dried fruit + honey — fast intra-session carbs"],
+        foods:      ["White rice — fast-digesting, ideal pre and post", "Oats + banana — pre-training combination", "Sweet potato — 26g, ideal evening carb with high micronutrient density", "Pasta — 43g per cup, good pre-training loading", "Dried fruit + honey — fast intra-session carbs", "Spinach or kale (evening) — pair with your post-training meal for magnesium and vitamin K"],
       },
       hydration: {
         totalOz:  100,
         schedule: "16oz immediately on waking. 16oz with pre-training meal. 16–24oz per hour during training. 24oz post-training. Remaining across the day in even sips.",
       },
       micronutrients: {
-        focus: ["Creatine (3–5g daily)", "Vitamin D", "Omega-3"],
-        note:  "On high-output days, creatine, vitamin D, and omega-3 each measurably support performance and recovery. Fatty fish, sunlight, and red meat cover two of three in whole-food form.",
+        focus: ["Creatine (3–5g daily)", "Vitamin D", "Omega-3", "Dark Leafy Greens"],
+        note:  "On high-output days, creatine, vitamin D, and omega-3 each measurably support performance and recovery. Add 2 cups of spinach, kale, or broccoli at your evening meal — the sulforaphane in brassica vegetables directly dampens exercise-induced inflammation overnight, so you wake up recovered instead of stiff.",
       },
-      coachingNote: "You cannot out-train poor nutrition — fuel every window today and the adaptation will follow.",
+      coachingNote: "You cannot out-train poor nutrition — fuel every window today, and do not skip the greens. They are what keeps a high-output day from becoming a sore, sluggish tomorrow.",
     };
   }
 
@@ -485,7 +489,7 @@ function generateNutritionSection(
   return {
     _type: "nutrition",
     title:    "Today's Nutrition",
-    overview: "Training-day nutrition fuels today's session and primes tomorrow's recovery. Be deliberate about timing — the windows around training matter most.",
+    overview: "Training-day nutrition fuels today's session and primes tomorrow's recovery. Be deliberate about timing — the windows around training matter most. Add a serving of dark leafy greens at lunch or dinner to keep micronutrients dialed in.",
     protein: {
       totalGrams: 170,
       perMeal:    43,
@@ -495,12 +499,16 @@ function generateNutritionSection(
     carbs: {
       totalGrams: 280,
       timing:     "Prioritize carbs in the meals around training. Pre-training: 50–60g. Post-training: 50–60g. Remaining across other meals.",
-      foods:      ["White rice — 45g per cup cooked, easy to digest", "Oats — 27g per half cup dry, sustained energy", "Banana — 27g, ideal pre-training", "Sweet potato — 26g, excellent post-training", "Bread — 30g per 2 slices, convenient"],
+      foods:      ["White rice — 45g per cup cooked, easy to digest", "Oats — 27g per half cup dry, sustained energy", "Banana — 27g, ideal pre-training", "Sweet potato — 26g, excellent post-training", "Bread — 30g per 2 slices, convenient", "Broccoli or spinach as a side — adds folate, vitamin C, and iron with minimal calories"],
     },
     hydration: {
       totalOz:  90,
       schedule: "16oz on waking. 12–16oz with pre-training meal. 16oz per hour during training. 24oz immediately post-training. Remainder across the day.",
     },
-    coachingNote: "Pre-training fuel is as important as post-training — both windows drive adaptation.",
+    micronutrients: {
+      focus: ["Iron", "Folate", "Vitamin C", "Dark Leafy Greens"],
+      note:  "At this training intensity, iron and folate are commonly under-consumed. Spinach, kale, broccoli, and asparagus address both and pair well with any protein source. Vitamin C from these vegetables also improves iron absorption when eaten alongside meat. Aim for 1–2 cups across your meals today.",
+    },
+    coachingNote: "Pre-training fuel is as important as post-training — both windows drive adaptation. A side of greens at one of those meals closes the micronutrient gap most athletes don't realize they have.",
   };
 }

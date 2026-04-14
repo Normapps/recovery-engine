@@ -1,21 +1,16 @@
 /**
- * Supabase client
+ * Supabase helpers
  *
- * Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY
- * in your .env.local to connect. The app works in offline/localStorage
- * mode without these values.
+ * All DB operations use the shared singleton client from lib/supabaseClient.ts.
+ * Do NOT create a second createClient() call here — that causes duplicate
+ * GoTrueClient instances and undefined auth behaviour.
  */
 
-import { createClient } from "@supabase/supabase-js";
 import type { PlanTaskItem, TrainingDay, PerformanceProfile } from "./types";
+import { supabaseClient } from "./supabaseClient";
 
-const supabaseUrl     = process.env.NEXT_PUBLIC_SUPABASE_URL     ?? process.env.SUPABASE_URL     ?? "";
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? process.env.SUPABASE_ANON_KEY ?? "";
-
-export const supabase =
-  supabaseUrl && supabaseAnonKey
-    ? createClient(supabaseUrl, supabaseAnonKey)
-    : null;
+/** Re-export the shared client as `supabase` for backwards compatibility. */
+export const supabase = supabaseClient;
 
 export const isSupabaseConnected = Boolean(supabase);
 

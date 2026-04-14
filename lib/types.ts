@@ -437,6 +437,8 @@ export const PERFORMANCE_GOALS = [
   "MMA / Combat Sports",
   "CrossFit",
   "Rock Climbing",
+  // Precision / Skill
+  "Golf",
   // Lifestyle
   "General Fitness",
   "Weekend Warrior",
@@ -477,6 +479,7 @@ export const GOAL_ARCHETYPE: Record<PerformanceGoal, AthleteArchetype> = {
   "MMA / Combat Sports":"hybrid",
   "CrossFit":           "hybrid",
   "Rock Climbing":      "hybrid",
+  "Golf":               "weekend_warrior",
   "General Fitness":    "weekend_warrior",
   "Weekend Warrior":    "weekend_warrior",
   "Longevity":          "longevity",
@@ -526,6 +529,30 @@ export interface PerformanceProfile {
 
 // ─── Store shape ─────────────────────────────────────────────────────────────
 
+export interface AthleteIdentity {
+  firstName:   string;
+  lastName:    string;
+  avatarUrl:   string | null;   // Supabase Storage public URL (no cache-bust param)
+}
+
+// ─── Device connections ───────────────────────────────────────────────────────
+
+export type DeviceProvider =
+  | "whoop" | "garmin" | "apple_watch" | "fitbit" | "oura"
+  | "apple_health" | "google_fit"
+  | "strava" | "training_peaks" | "nike_run_club"
+  | "myfitnesspal" | "cronometer";
+
+export type DeviceDataType =
+  | "Sleep" | "HRV" | "Heart Rate" | "Training Load" | "Nutrition" | "Steps";
+
+export interface DeviceConnection {
+  provider:    DeviceProvider;
+  isConnected: boolean;
+  lastSync:    string | null;      // ISO timestamp or null
+  dataTypes:   DeviceDataType[];
+}
+
 export interface AppState {
   // Current day
   todayEntry: DailyEntry | null;
@@ -545,6 +572,10 @@ export interface AppState {
   planTaskLog: Record<string, PlanTaskItem[]>;
   // Performance profile
   performanceProfile: PerformanceProfile | null;
+  // Athlete identity (name + avatar) — persisted locally, synced to Supabase when auth available
+  athleteIdentity: AthleteIdentity;
+  // Connected devices & apps (keyed by provider)
+  deviceConnections: Record<string, DeviceConnection>;
   // Settings
   coachingPrefs: CoachingPreferences;
   // Actions
@@ -563,4 +594,7 @@ export interface AppState {
   setPlanTaskLog:  (date: string, tasks: PlanTaskItem[]) => void;
   togglePlanTask:  (date: string, taskId: string) => void;
   setPerformanceProfile: (profile: PerformanceProfile | null) => void;
+  setAthleteIdentity: (identity: Partial<AthleteIdentity>) => void;
+  setDeviceConnection: (conn: DeviceConnection) => void;
+  removeDeviceConnection: (provider: DeviceProvider) => void;
 }

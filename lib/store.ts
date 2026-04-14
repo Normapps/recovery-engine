@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { AppState, DailyEntry, RecoveryScore, BloodworkEntry, CoachingPreferences, TrainingPlan, PerformanceProfile, DailyTaskCompletion, PlanTaskItem } from "./types";
+import type { AppState, DailyEntry, RecoveryScore, BloodworkEntry, CoachingPreferences, TrainingPlan, PerformanceProfile, DailyTaskCompletion, PlanTaskItem, AthleteIdentity, DeviceConnection, DeviceProvider } from "./types";
 import { format } from "date-fns";
 import { computeRecoveryScore } from "./recovery-engine";
 
@@ -21,6 +21,8 @@ export const useStore = create<AppState>()(
       taskLog: {},
       planTaskLog: {},
       performanceProfile: null,
+      athleteIdentity: { firstName: "", lastName: "", avatarUrl: null },
+      deviceConnections: {},
       coachingPrefs: { mode: "balanced" },
 
       setTodayEntry: (entry) => set({ todayEntry: entry }),
@@ -98,6 +100,24 @@ export const useStore = create<AppState>()(
 
       setPerformanceProfile: (profile: PerformanceProfile | null) =>
         set({ performanceProfile: profile }),
+
+      setAthleteIdentity: (partial: Partial<AthleteIdentity>) =>
+        set((state) => ({
+          athleteIdentity: { ...state.athleteIdentity, ...partial },
+        })),
+
+      setDeviceConnection: (conn: DeviceConnection) =>
+        set((state) => ({
+          deviceConnections: { ...state.deviceConnections, [conn.provider]: conn },
+        })),
+
+      removeDeviceConnection: (provider: DeviceProvider) =>
+        set((state) => {
+          const updated = { ...state.deviceConnections };
+          delete updated[provider];
+          return { deviceConnections: updated };
+        }),
+
       setCoachingPrefs: (prefs) => set({ coachingPrefs: prefs }),
 
       setAdjustedScore: (date, adjustedScore) =>
@@ -114,20 +134,21 @@ export const useStore = create<AppState>()(
     }),
     {
       name: "recovery-engine-store",
-      version: 4,
+      version: 5,
       migrate: (persistedState: unknown, version: number) => {
         const state = persistedState as Record<string, unknown>;
         if (version < 2) {
-          // BloodworkEntry structure changed in v2 — clear legacy data
           return { ...state, bloodwork: [], planTaskLog: {} };
         }
         if (version < 3) {
-          // planTaskLog added in v3 — initialise to empty
           return { ...state, planTaskLog: {} };
         }
         if (version < 4) {
-          // Reset plan task completion state so fresh checkboxes render
           return { ...state, planTaskLog: {} };
+        }
+        if (version < 5) {
+          // deviceConnections added in v5
+          return { ...state, deviceConnections: {} };
         }
         return state;
       },

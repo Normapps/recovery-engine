@@ -1,10 +1,20 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
-import { ArrowLeft, Check, ChevronDown, ChevronUp } from "lucide-react";
+import { ArrowLeft, Check, ChevronDown, ChevronUp, Camera, User } from "lucide-react";
 import { useStore } from "@/lib/store";
 import { upsertPerformanceProfile } from "@/lib/supabase";
+import { uploadAvatar, updateAthleteName, fetchAthleteIdentity, resolveCurrentUserId } from "@/lib/api/uploadAvatar";
+
+// ─── Height helpers (ft+in ↔ total inches) ───────────────────────────────────
+function inchesToFtIn(totalIn: number | null): { ft: number; inches: number } {
+  if (totalIn == null || totalIn <= 0) return { ft: 0, inches: 0 };
+  return { ft: Math.floor(totalIn / 12), inches: Math.round(totalIn % 12) };
+}
+function ftInToInches(ft: number, inches: number): number {
+  return ft * 12 + inches;
+}
 import {
   PERFORMANCE_GOALS,
   GOAL_ARCHETYPE,
@@ -166,6 +176,7 @@ const GOAL_ICONS: Record<PerformanceGoal, string> = {
   "Triathlon":"🏊","Ironman":"🔱","Cycling Race":"🚴","Swimming":"🏊","Rowing":"🚣",
   "Strength Training":"🏋️","Powerlifting":"🏋️","MMA / Combat Sports":"🥊",
   "CrossFit":"🔥","Rock Climbing":"🧗",
+  "Golf":"⛳",
   "General Fitness":"⚡","Weekend Warrior":"🎯","Longevity":"🌿",
 };
 
@@ -186,6 +197,7 @@ const GOAL_GROUPS: Array<{ label: string; goals: PerformanceGoal[] }> = [
   { label: "Team Sports",      goals: ["Soccer","Basketball","Football","Baseball / Softball","Volleyball","Hockey","Rugby / Lacrosse"] },
   { label: "Endurance",        goals: ["Marathon","Half Marathon","Trail Running","Triathlon","Ironman","Cycling Race","Swimming","Rowing"] },
   { label: "Strength & Combat",goals: ["Strength Training","Powerlifting","MMA / Combat Sports","CrossFit","Rock Climbing"] },
+  { label: "Precision & Skill",goals: ["Golf"] },
   { label: "Lifestyle",        goals: ["General Fitness","Weekend Warrior","Longevity"] },
 ];
 
@@ -243,6 +255,197 @@ function HoursSlider({ value, onChange }: { value: number | null; onChange: (v: 
   );
 }
 
+// ─── Avatar section ───────────────────────────────────────────────────────────
+
+function AvatarSection() {
+  // Store is the source of truth — always available, no auth required
+  const identity          = useStore((s) => s.athleteIdentity);
+  const setAthleteIdentity = useStore((s) => s.setAthleteIdentity);
+
+  const [firstName,   setFirstName]   = useState(identity.firstName);
+  const [lastName,    setLastName]    = useState(identity.lastName);
+  const [previewUrl,  setPreviewUrl]  = useState<string | null>(identity.avatarUrl);
+  const [uploading,   setUploading]   = useState(false);
+  const [nameSaving,  setNameSaving]  = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // On mount: if Supabase auth is available, pull remote identity and merge into store
+  useEffect(() => {
+    resolveCurrentUserId().then(async (uid) => {
+      if (!uid) return;
+      const remote = await fetchAthleteIdentity(uid);
+      if (!remote) return;
+      const merged = {
+        firstName: remote.first_name ?? identity.firstName,
+        lastName:  remote.last_name  ?? identity.lastName,
+        avatarUrl: remote.avatar_url ?? identity.avatarUrl,
+      };
+      setAthleteIdentity(merged);
+      setFirstName(merged.firstName);
+      setLastName(merged.lastName);
+      if (merged.avatarUrl) {
+        const bust = remote.avatar_updated_at
+          ? `?v=${new Date(remote.avatar_updated_at).getTime()}`
+          : "";
+        setPreviewUrl(merged.avatarUrl + bust);
+      }
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Show local preview immediately — works without auth
+    const objectUrl = URL.createObjectURL(file);
+    setPreviewUrl(objectUrl);
+    setUploading(true);
+    setUploadError(null);
+
+    // Try to persist to Supabase Storage if auth is available
+    const uid = await resolveCurrentUserId();
+    if (uid) {
+      const result = await uploadAvatar(uid, file);
+      if (!result.success) {
+        setUploadError(result.error);
+      } else {
+        // Replace object URL with the stable Supabase URL + cache bust
+        setPreviewUrl(result.avatarUrl);
+        URL.revokeObjectURL(objectUrl);
+        // Store the clean URL (without ?v= param)
+        const cleanUrl = result.avatarUrl.split("?")[0];
+        setAthleteIdentity({ avatarUrl: cleanUrl });
+      }
+    }
+    // No auth: keep blob preview for this session (store can't persist a blob URL)
+    setUploading(false);
+    e.target.value = "";
+  }
+
+  async function handleNameSave() {
+    const first = firstName.trim();
+    const last  = lastName.trim();
+    if (!first && !last) return;
+
+    setNameSaving("saving");
+
+    // Always save to store first — works offline
+    setAthleteIdentity({ firstName: first, lastName: last });
+
+    // Also sync to Supabase if auth is available
+    const uid = await resolveCurrentUserId();
+    if (uid) {
+      const result = await updateAthleteName(uid, first, last);
+      setNameSaving(result.success ? "saved" : "error");
+    } else {
+      // Saved locally
+      setNameSaving("saved");
+    }
+
+    setTimeout(() => setNameSaving("idle"), 2000);
+  }
+
+  const displayName = [firstName, lastName].filter(Boolean).join(" ");
+
+  return (
+    <div className={`${CARD} flex flex-col items-center gap-5`}>
+      {/* Avatar ring */}
+      <div className="relative">
+        <div className="w-24 h-24 rounded-full overflow-hidden border-2 border-gold/30 bg-bg-elevated flex items-center justify-center">
+          {previewUrl ? (
+            <img src={previewUrl} alt="Profile" className="w-full h-full object-cover" />
+          ) : (
+            <User size={36} className="text-text-muted" />
+          )}
+          {uploading && (
+            <div className="absolute inset-0 rounded-full bg-black/50 flex items-center justify-center">
+              <div className="w-5 h-5 border-2 border-gold/30 border-t-gold rounded-full animate-spin" />
+            </div>
+          )}
+        </div>
+
+        {/* Camera button */}
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploading}
+          className="absolute bottom-0 right-0 w-7 h-7 rounded-full bg-gold flex items-center justify-center shadow-lg border-2 border-bg-card hover:bg-gold/90 active:scale-95 transition-all disabled:opacity-50"
+        >
+          <Camera size={12} className="text-bg-primary" />
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp,image/gif"
+          className="hidden"
+          onChange={handleFileChange}
+        />
+      </div>
+
+      {/* Name display */}
+      {displayName && (
+        <p className="text-base font-bold text-text-primary -mb-2">{displayName}</p>
+      )}
+
+      {/* Upload error */}
+      {uploadError && (
+        <p className="text-xs text-red-400 text-center">{uploadError}</p>
+      )}
+
+      {/* Name fields */}
+      <div className="w-full grid grid-cols-2 gap-3">
+        <div>
+          <label className={FIELD_LABEL}>First Name</label>
+          <div className={INPUT_WRAP}>
+            <input
+              type="text"
+              value={firstName}
+              placeholder="Alex"
+              onChange={(e) => setFirstName(e.target.value)}
+              className={INPUT_BASE}
+            />
+          </div>
+        </div>
+        <div>
+          <label className={FIELD_LABEL}>Last Name</label>
+          <div className={INPUT_WRAP}>
+            <input
+              type="text"
+              value={lastName}
+              placeholder="Morgan"
+              onChange={(e) => setLastName(e.target.value)}
+              className={INPUT_BASE}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Name save button */}
+      <button
+        onClick={handleNameSave}
+        disabled={(!firstName.trim() && !lastName.trim()) || nameSaving === "saving"}
+        className={`w-full py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 ${
+          nameSaving === "saved"
+            ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30"
+            : nameSaving === "error"
+            ? "bg-red-500/15 text-red-400 border border-red-500/30"
+            : "bg-bg-elevated border border-bg-border text-text-secondary hover:border-text-muted/50 hover:text-text-primary"
+        } disabled:opacity-40 disabled:cursor-not-allowed`}
+      >
+        {nameSaving === "saving" ? "Saving..." :
+         nameSaving === "saved"  ? <><Check size={12} /> Saved</> :
+         nameSaving === "error"  ? "Error — try again" :
+         "Save Name"}
+      </button>
+
+      <p className="text-xs text-text-muted text-center -mt-2">
+        {previewUrl ? "Tap the camera icon to change your photo" : "Tap the camera icon to add a photo"}
+      </p>
+    </div>
+  );
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function ProfilePage() {
@@ -258,7 +461,9 @@ export default function ProfilePage() {
   // Athlete basics
   const [age,             setAge]             = useState<number | null>(saved?.age            ?? null);
   const [sex,             setSex]             = useState<Sex | "">(saved?.sex                 ?? "");
-  const [heightIn,        setHeightIn]        = useState<number | null>(saved?.heightIn       ?? null);
+  const [heightFt,        setHeightFt]        = useState<number>(inchesToFtIn(saved?.heightIn ?? null).ft);
+  const [heightInches,    setHeightInches]    = useState<number>(inchesToFtIn(saved?.heightIn ?? null).inches);
+  const heightIn = (heightFt > 0 || heightInches > 0) ? ftInToInches(heightFt, heightInches) : null;
   const [bodyWeightLbs,   setBodyWeightLbs]   = useState<number | null>(saved?.bodyWeightLbs  ?? null);
   const [experienceLevel, setExperienceLevel] = useState<ExperienceLevel | "">(saved?.experienceLevel ?? "");
 
@@ -310,12 +515,18 @@ export default function ProfilePage() {
       eventImportance:    eventTraining ? ((eventImportance as EventImportance) || null) : null,
     };
 
+    // Always save to store first — works offline, no auth needed
     setPerformanceProfile(profile);
 
-    // Fire-and-forget to Supabase (no-ops when not configured)
-    const userId = "local"; // replace with auth user ID when auth is wired
-    const result = await upsertPerformanceProfile(userId, profile);
-    setSaveState(result.error ? "error" : "saved");
+    // Sync to Supabase only when a real user ID is available from auth session
+    const userId = await resolveCurrentUserId();
+    if (userId) {
+      const result = await upsertPerformanceProfile(userId, profile);
+      setSaveState(result.error ? "error" : "saved");
+    } else {
+      // Saved locally — no Supabase session yet
+      setSaveState("saved");
+    }
     setTimeout(() => setSaveState("idle"), 2500);
   }
 
@@ -333,12 +544,46 @@ export default function ProfilePage() {
         </div>
       </div>
 
+      {/* ── 0. Identity — avatar + name ──────────────────────────────────── */}
+      <AvatarSection />
+
       {/* ── 1. Athlete Basics ─────────────────────────────────────────────── */}
       <SectionCard title="Athlete Basics">
         <div className="grid grid-cols-2 gap-3">
           <NumField label="Age" value={age} onChange={setAge} unit="yrs" placeholder="28" min={13} max={90} />
-          <NumField label="Height" value={heightIn} onChange={setHeightIn} unit="in" placeholder="70" min={48} max={96} />
           <NumField label="Weight" value={bodyWeightLbs} onChange={setBodyWeightLbs} unit="lbs" placeholder="175" min={80} max={400} />
+        </div>
+
+        {/* Height — ft + in picker */}
+        <div>
+          <label className={FIELD_LABEL}>Height</label>
+          <div className="flex gap-2">
+            <div className={`${INPUT_WRAP} flex-1`}>
+              <input
+                type="number"
+                min={3} max={8}
+                value={heightFt || ""}
+                placeholder="5"
+                onChange={(e) => setHeightFt(parseInt(e.target.value) || 0)}
+                className={INPUT_BASE}
+              />
+              <span className="text-xs text-text-muted shrink-0">ft</span>
+            </div>
+            <div className={`${INPUT_WRAP} flex-1`}>
+              <input
+                type="number"
+                min={0} max={11}
+                value={heightInches || ""}
+                placeholder="10"
+                onChange={(e) => setHeightInches(parseInt(e.target.value) || 0)}
+                className={INPUT_BASE}
+              />
+              <span className="text-xs text-text-muted shrink-0">in</span>
+            </div>
+          </div>
+          {heightIn && (
+            <p className="text-xs text-text-muted mt-1 pl-1">{heightIn} inches total</p>
+          )}
         </div>
 
         <div>
