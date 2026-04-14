@@ -1077,7 +1077,7 @@ function DashboardContent({
   };
 
   return (
-    <div className="flex flex-col gap-6 animate-fade-in">
+    <div className="flex flex-col gap-4 animate-fade-in">
 
       {/* ── Header ──────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between">
@@ -1105,10 +1105,10 @@ function DashboardContent({
         const daysUntil = Math.ceil(
           (new Date(performanceProfile.eventDate + "T12:00:00").getTime() - Date.now()) / 86400000
         );
-        if (daysUntil < 0) return null; // event passed
-        const isImminient = daysUntil <= 7;
-        const isTaper     = daysUntil <= 21 && daysUntil > 7;
-        const urgencyColor = isImminient ? "#EF4444" : isTaper ? "#F59E0B" : "#F59E0B";
+        if (daysUntil < 0) return null;
+        const isImminient  = daysUntil <= 7;
+        const isTaper      = daysUntil <= 21 && daysUntil > 7;
+        const urgencyColor = isImminient ? "#EF4444" : "#F59E0B";
         return (
           <div
             className="rounded-2xl border px-4 py-3 flex items-center justify-between"
@@ -1132,22 +1132,26 @@ function DashboardContent({
         );
       })()}
 
-      {/* ── Score rings ─────────────────────────────────────────────────── */}
-      <div className="flex flex-col sm:flex-row items-center justify-center gap-6">
+      {/* ══════════════════════════════════════════════════════════════════
+          1. RECOVERY SCORE — hero section
+          ══════════════════════════════════════════════════════════════════ */}
+
+      {/* Score rings */}
+      <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
         <RecoveryScoreRing score={displayScore}   confidence={confidence} size={200} animated         label="Recovery"  colorVariant="muted" />
         <RecoveryScoreRing score={readinessScore} confidence={confidence} size={200} animated={false} label="Readiness" colorVariant="muted" />
       </div>
 
-      {/* ── Override ────────────────────────────────────────────────────── */}
+      {/* Override */}
       <ScoreOverride
         date={todayScore.date}
         calculatedScore={todayScore.calculatedScore}
         adjustedScore={todayScore.adjustedScore}
       />
 
-      {/* ── Coach message ───────────────────────────────────────────────── */}
+      {/* Coach insight — short, reads as the score's explanation */}
       <div className="bg-bg-card border border-bg-border rounded-2xl p-4">
-        <div className="flex items-center gap-2 mb-3">
+        <div className="flex items-center gap-2 mb-2">
           <span
             className="h-2 w-2 rounded-full shrink-0"
             style={{ backgroundColor: modeColor[coachMode] }}
@@ -1164,7 +1168,28 @@ function DashboardContent({
         </p>
       </div>
 
-      {/* ── Today's Plan ────────────────────────────────────────────────── */}
+      {/* ══════════════════════════════════════════════════════════════════
+          2. WHAT YOU SHOULD DO TODAY — primary action card (above the fold)
+          ══════════════════════════════════════════════════════════════════ */}
+      <div className="bg-bg-card border border-gold/20 rounded-2xl p-4 flex flex-col gap-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xs font-bold text-text-primary uppercase tracking-widest">
+            What You Should Do Today
+          </h2>
+          <span className="text-xs font-bold text-gold uppercase tracking-wider">
+            Personalized
+          </span>
+        </div>
+        <div className="flex flex-col gap-2">
+          {recommendations.map((rec) => (
+            <ModalityCard key={rec.id} rec={rec} />
+          ))}
+        </div>
+      </div>
+
+      {/* ══════════════════════════════════════════════════════════════════
+          3. TODAY'S PLAN — training / recovery / mobility
+          ══════════════════════════════════════════════════════════════════ */}
       <TodaysPlanCard
         plan={dailyPlan}
         details={planDetails}
@@ -1172,7 +1197,42 @@ function DashboardContent({
         onToggle={handleTogglePlanTask}
       />
 
-      {/* ── Score breakdown ─────────────────────────────────────────────── */}
+      {/* ══════════════════════════════════════════════════════════════════
+          4. SUPPORTING DATA — lower priority
+          ══════════════════════════════════════════════════════════════════ */}
+
+      {/* Mood + feel context */}
+      <MoodPicker value={todayMood} onChange={onMoodChange} />
+
+      {(sorenessText || energyText) && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs text-text-muted">Today:</span>
+          {sorenessText && (
+            <span className={`text-xs font-semibold px-2.5 py-1 rounded-full border ${
+              todayEntry.soreness! >= 4
+                ? "border-red-500/30 bg-red-500/10 text-red-400"
+                : todayEntry.soreness! >= 3
+                ? "border-amber-500/30 bg-amber-500/10 text-amber-400"
+                : "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+            }`}>
+              {sorenessText}
+            </span>
+          )}
+          {energyText && (
+            <span className={`text-xs font-semibold px-2.5 py-1 rounded-full border ${
+              todayEntry.energyLevel! <= 2
+                ? "border-red-500/30 bg-red-500/10 text-red-400"
+                : todayEntry.energyLevel! <= 3
+                ? "border-amber-500/30 bg-amber-500/10 text-amber-400"
+                : "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+            }`}>
+              {energyText}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Score breakdown */}
       <div>
         <h2 className="text-xs font-bold text-text-secondary uppercase tracking-widest mb-3">
           What's Driving Your Score
@@ -1212,39 +1272,7 @@ function DashboardContent({
         </div>
       </div>
 
-      {/* ── Mood ─────────────────────────────────────────────────────────── */}
-      <MoodPicker value={todayMood} onChange={onMoodChange} />
-
-      {/* ── Soreness + Energy context pills ─────────────────────────────── */}
-      {(sorenessText || energyText) && (
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-xs text-text-muted">Today:</span>
-          {sorenessText && (
-            <span className={`text-xs font-semibold px-2.5 py-1 rounded-full border ${
-              todayEntry.soreness! >= 4
-                ? "border-red-500/30 bg-red-500/10 text-red-400"
-                : todayEntry.soreness! >= 3
-                ? "border-amber-500/30 bg-amber-500/10 text-amber-400"
-                : "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
-            }`}>
-              {sorenessText}
-            </span>
-          )}
-          {energyText && (
-            <span className={`text-xs font-semibold px-2.5 py-1 rounded-full border ${
-              todayEntry.energyLevel! <= 2
-                ? "border-red-500/30 bg-red-500/10 text-red-400"
-                : todayEntry.energyLevel! <= 3
-                ? "border-amber-500/30 bg-amber-500/10 text-amber-400"
-                : "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
-            }`}>
-              {energyText}
-            </span>
-          )}
-        </div>
-      )}
-
-      {/* ── Training impact ──────────────────────────────────────────────── */}
+      {/* Training impact */}
       {trainingPlan && (
         <div className="bg-bg-card border border-bg-border rounded-2xl p-4 flex flex-col gap-2">
           <div className="flex items-center gap-2 mb-1">
@@ -1291,24 +1319,7 @@ function DashboardContent({
         </div>
       )}
 
-      {/* ── Recovery modalities ─────────────────────────────────────────── */}
-      <div>
-        <div className="flex items-center justify-between mb-1">
-          <h2 className="text-xs font-bold text-text-secondary uppercase tracking-widest">
-            What To Do Right Now
-          </h2>
-          <span className="text-xs font-bold text-gold uppercase tracking-wider">
-            Personalized
-          </span>
-        </div>
-        <div className="flex flex-col gap-2">
-          {recommendations.map((rec) => (
-            <ModalityCard key={rec.id} rec={rec} />
-          ))}
-        </div>
-      </div>
-
-      {/* ── Quick links ─────────────────────────────────────────────────── */}
+      {/* Trends + Labs links */}
       <Link
         href="/trends"
         className="flex items-center justify-between bg-bg-card border border-bg-border rounded-2xl p-4 hover:border-text-muted/40 transition-colors"
