@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useStore } from "@/lib/store";
 import {
@@ -225,7 +225,10 @@ function PlanUploader({
   const [uploadState, setUploadState] = useState<UploadState>("idle");
   const [errorMsg, setErrorMsg]       = useState<string>("");
   const [fileName, setFileName]       = useState<string>("");
-  const inputRef                      = useRef<HTMLInputElement>(null);
+  const inputRef    = useRef<HTMLInputElement>(null);
+  // Keep a stable ref to uploadFile so the window listeners always call
+  // the latest closure without needing to re-register on every render.
+  const uploadRef   = useRef<(file: File) => void>(() => {});
 
   // ── Shared upload function ─────────────────────────────────────────────────
   async function uploadFile(file: File) {
@@ -270,6 +273,33 @@ function PlanUploader({
       setUploadState("error");
     }
   }
+
+  // Keep the ref in sync so window listeners always call the latest uploadFile
+  uploadRef.current = uploadFile;
+
+  // ── Global window-level drag listeners ────────────────────────────────────
+  // Bypasses all z-index / pointer-events / component-nesting issues.
+  // Active only while PlanUploader is mounted.
+  useEffect(() => {
+    function onWindowDragOver(e: DragEvent) {
+      e.preventDefault();
+    }
+
+    function onWindowDrop(e: DragEvent) {
+      e.preventDefault();
+      const file = e.dataTransfer?.files[0];
+      console.log("FILE DROPPED:", file);
+      if (file) uploadRef.current(file);
+    }
+
+    window.addEventListener("dragover", onWindowDragOver);
+    window.addEventListener("drop",     onWindowDrop);
+
+    return () => {
+      window.removeEventListener("dragover", onWindowDragOver);
+      window.removeEventListener("drop",     onWindowDrop);
+    };
+  }, []); // register once on mount, clean up on unmount
 
   // ── Drag-and-drop handlers ─────────────────────────────────────────────────
   function handleDragOver(e: React.DragEvent) {
