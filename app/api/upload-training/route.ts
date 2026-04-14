@@ -340,12 +340,16 @@ weights/lifting/powerlifting → "strength"
 mixed/cross-training → "hybrid"
 
 ━━━ TYPE + CATEGORY MAPPING ━━━
-"Run 5 miles" / "Easy jog" / "Bike 30 min"  → type:"Run",      category:"cardio"
-"Strength 45 min" / "Gym" / "Lift"           → type:"Strength", category:"strength"
-"Practice 1h 15min" / "Drill" / "Skills"     → type:"Practice", category:"sport"
-"Game 2h" / "Match" / "Race" / "Competition" → type:"Game",     category:"sport"
-"Yoga" / "Stretch" / "Easy" / "Mobility"     → type:"Recovery", category:"recovery"
-"Rest" / "Off" / (blank)                     → type:"Off",      category:"recovery"
+"Run 5 miles" / "Easy jog" / "Bike 30 min"                      → type:"Run",      category:"cardio"
+"Strength 45 min" / "Gym" / "Lift"                              → type:"Strength", category:"strength"
+"Training" / "Practice" / "Drill" / "Skills" / "Tactical"       → type:"Practice", category:"sport"
+"Game 2h" / "Match" / "Race" / "Competition"                    → type:"Game",     category:"sport"
+"Pre-Game Activation" / "Activation" / "Warm-up"                → type:"Practice", category:"sport"
+"Yoga" / "Stretch" / "Easy" / "Mobility" / "Recovery session"   → type:"Recovery", category:"recovery"
+"Rest" / "Off" / (blank)                                        → type:"Off",      category:"recovery"
+
+CRITICAL: The word "Training" always maps to type:"Practice", category:"sport" — NEVER to type:"Off".
+If a day says "Training (technical + small sided games) 90 min" → type:"Practice", category:"sport", duration_minutes:90, intensity:high
 
 ━━━ INTENSITY ━━━
 low      → Easy, jog, walk, yoga, active recovery, rest
@@ -371,13 +375,17 @@ Always convert to miles (1 km = 0.621 mi). Null if not mentioned.
 6. Return ONLY the JSON object — nothing else
 
 ━━━ MESSY INPUT EXAMPLES ━━━
-"Mon - Run 5 miles"              → day:Monday, type:Run, subtype:Easy Run, category:cardio, distance_miles:5, duration_minutes:40, intensity:low
-"Tue: Strength 45 min"           → day:Tuesday, type:Strength, category:strength, duration_minutes:45, intensity:moderate
-"Wed – Tempo 6mi @ threshold"    → day:Wednesday, type:Run, subtype:Tempo Run, category:cardio, distance_miles:6, duration_minutes:50, intensity:high
-"Thu  rest"                      → day:Thursday, type:Off, category:recovery, duration_minutes:0, intensity:low
-"Fri: Practice 1h 15min"         → day:Friday, type:Practice, category:sport, duration_minutes:75, intensity:moderate
-"Sat: Game 2h high"              → day:Saturday, type:Game, category:sport, duration_minutes:120, intensity:high
-"Sun Long Run 20 miles easy"     → day:Sunday, type:Run, subtype:Long Run, category:cardio, distance_miles:20, duration_minutes:110, intensity:low
+"Mon - Run 5 miles"                                          → day:Monday,    type:Run,      category:cardio,    distance_miles:5,   duration_minutes:40,  intensity:low
+"Tue: Strength 45 min"                                       → day:Tuesday,   type:Strength, category:strength,  duration_minutes:45, intensity:moderate
+"Wed – Tempo 6mi @ threshold"                                → day:Wednesday, type:Run,      subtype:Tempo Run,  category:cardio,    distance_miles:6,    duration_minutes:50,  intensity:high
+"Thu  rest"                                                  → day:Thursday,  type:Off,      category:recovery,  duration_minutes:0,  intensity:low
+"Fri: Practice 1h 15min"                                     → day:Friday,    type:Practice, category:sport,     duration_minutes:75, intensity:moderate
+"Sat: Game 2h high"                                          → day:Saturday,  type:Game,     category:sport,     duration_minutes:120, intensity:high
+"Sun Long Run 20 miles easy"                                 → day:Sunday,    type:Run,      subtype:Long Run,   category:cardio,    distance_miles:20,   duration_minutes:110, intensity:low
+"Tuesday — Training (technical + small sided games) 90 min"  → day:Tuesday,   type:Practice, category:sport,     duration_minutes:90, intensity:high
+"Thursday — Training (possession + tactical shape) 90 min"   → day:Thursday,  type:Practice, category:sport,     duration_minutes:90, intensity:moderate
+"Friday — Pre-Game Activation 45 min"                        → day:Friday,    type:Practice, category:sport,     duration_minutes:45, intensity:low
+"Monday — Recovery (light jog + mobility) 30 min"            → day:Monday,    type:Recovery, category:recovery,  duration_minutes:30, intensity:low
 
 Document:
 ${text.slice(0, 12000)}`;
