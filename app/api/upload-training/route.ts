@@ -130,15 +130,19 @@ function resolveTrainingType(type: string, category: string): TrainingType {
   const c = category.toLowerCase().trim();
 
   if (/\boff\b|\brest\b|\bnone\b/.test(t))                               return "off";
-  // Pre-game / activation must come before the game check so "Pre-Game Activation"
-  // is not misclassified as a game.
-  if (/pre.?game|pregame|\bactivation\b|\bwarm.?up\b/.test(t))          return "practice";
-  if (/\bgame\b|\brace\b|\bcompetition\b|\bmatch\b/.test(t))             return "game";
-  // "Training" is the standard soccer/team-sport session label.
-  if (/\bpractice\b|\bdrill\b|\bskills\b|\btraining\b|\btactical\b|\btechnical\b/.test(t)) return "practice";
-  if (/\brecovery\b|\byoga\b|\bmobility\b|\bstretch\b|\bwalk\b/.test(t)) return "recovery";
-  if (/\bstrength\b|\blift\b|\bweights?\b|\bgym\b|\bpower\b/.test(t))    return "strength";
-  if (/\brun\b|\bbike\b|\bswim\b|\brow\b|\bcardio\b|\bcycle\b|\bhike\b|\bspin\b|intervals?|sprints?|\bfartlek\b|\btempo\b|\bjog\b/.test(t)) return "cardio";
+
+  // Pre-game / activation / shoot-around must come BEFORE game check
+  if (/pre.?game|pregame|\bactivation\b|\bwarm.?up\b|shoot.?around|shootaround|\bwalkthrough\b|\bwalk.through\b|\bfilm\b|\bvideo\b|\bmeetings?\b/.test(t)) return "practice";
+
+  // Competition labels — any sport
+  if (/\bgame\b|\brace\b|\bcompetition\b|\bmatch\b|\bmeet\b|\btournament\b|\bbout\b|\bfight\b|\bspar(?:ring)?\b|\bregatta\b|\btime\s*trial\b/.test(t)) return "game";
+
+  // Team-sport session labels — soccer, basketball, football, hockey, rugby, baseball, volleyball, MMA, etc.
+  if (/\bpractice\b|\bdrill\b|\bskills\b|\btraining\b|\btactical\b|\btechnical\b|\bsession\b|\bworkout\b|\bwork\s*out\b|\bclimbing\b|\bbouldering\b|\bpositional\b|\bpossession\b|\bpressing\b|\bconditioning\b|\bshape\b|\bfinishing\b|\btransition\b|\bset\s*piece\b|\bsmall.sided\b|\bpad\s*work\b|\bhitting\b|\bbatting\b|\bfielding\b|\bbullpen\b|\bsparring\b|\bgrappling\b|\brolling\b|\bbjj\b|\bmuay\s*thai\b|\bboxing\b|\bgroundstroke\b|\bpool\s*session\b|\bwod\b|\bmetcon\b|\bamrap\b|\bemom\b|crossfit|\bspike\b|\bvolley\b/.test(t)) return "practice";
+
+  if (/\brecovery\b|\byoga\b|\bmobility\b|\bstretch\b|\bwalk\b|\bfoam\b|\bsauna\b|\bice\b|\bpool\s*walk\b/.test(t)) return "recovery";
+  if (/\bstrength\b|\blift\b|\bweights?\b|\bgym\b|\bpower\b|\bclean\b|\bsnatch\b|\bdeadlift\b|\bsquat\b|\bbench\b/.test(t)) return "strength";
+  if (/\brun\b|\bbike\b|\bswim\b|\brow\b|\bcardio\b|\bcycle\b|\bhike\b|\bspin\b|intervals?|sprints?|\bfartlek\b|\btempo\b|\bjog\b|\berskine\b|\bpace\b/.test(t)) return "cardio";
 
   if (c === "cardio")   return "cardio";
   if (c === "strength") return "strength";
@@ -150,16 +154,17 @@ function resolveTrainingType(type: string, category: string): TrainingType {
 
 function inferIntensity(tt: TrainingType, subtype: string): IntensityLevel {
   const s = subtype.toLowerCase();
-  // BUG-FIX #1 + #2: Check explicit low signals FIRST so "easy long run" and
-  // "pre-game activation" are never misclassified by a later high/moderate rule.
-  if (/pre.?game|pregame|\bactivation\b|\bwalkthrough\b|\bdeload\b/.test(s))         return "low";
-  if (/\beasy\b|\blight\b|\bjog\b|\bwalk\b|\byoga\b|\bstretch\b|\bmobility\b|\brecovery\b|\bwarm.?up\b/.test(s)) return "low";
-  // BUG-FIX #3: "hill repeats?" (plural) and remove "threshold" from HIGH —
-  // threshold is comfortably-hard (moderate), not max-effort (high).
-  if (/intervals?|speed\s*work|sprints?|\bfartlek\b|hill\s+repeats?|\brace\b|\bgames?\b|high\s*intensity|\bpressing\b|\bconditioning\b/.test(s)) return "high";
-  // "tempo" belongs here (moderate-hard, below race pace).
-  // "threshold" belongs here too — it is the lactate threshold pace, not sprint.
-  if (/\btempo\b|\bthreshold\b|long\s+run|marathon\s+pace|\bmoderate\b|\bpractice\b|\btactical\b|\btechnical\b|\bpossession\b|\bfinishing\b|\btransition\b/.test(s)) return "moderate";
+
+  // LOW — always check first: pre-game prep, deload, passive sessions
+  if (/pre.?game|pregame|\bactivation\b|\bwalkthrough\b|\bwalk.through\b|\bdeload\b|\bfilm\b|\bvideo\b|\bmeeting\b|\bshoot.?around\b/.test(s)) return "low";
+  if (/\beasy\b|\blight\b|\bjog\b|\bwalk\b|\byoga\b|\bstretch\b|\bmobility\b|\brecovery\b|\bwarm.?up\b|\bpool\s*walk\b|\bfoam\b|\bsauna\b/.test(s)) return "low";
+
+  // HIGH — max-effort sessions across any sport
+  if (/intervals?|speed\s*work|sprints?|\bfartlek\b|hill\s+repeats?|\brace\b|\bgames?\b|\bmatch\b|\bbout\b|\bfight\b|high\s*intensity|\bpressing\b|\bconditioning\b|\bsparring\b|\bgrappling\b|\bpad\s*work\b|\bwod\b|\bmetcon\b|\bamrap\b|\bemom\b|\bsmall.sided\b|\bhigh\s*press\b|game.speed/.test(s)) return "high";
+
+  // MODERATE — technical/tactical work, steady-state, threshold
+  if (/\btempo\b|\bthreshold\b|long\s+run|marathon\s+pace|\bmoderate\b|\bpractice\b|\btactical\b|\btechnical\b|\bpossession\b|\bfinishing\b|\btransition\b|\bpositional\b|\bset\s*piece\b|\bskills\b|\bdrills?\b|\bbatting\b|\bfielding\b|\bbullpen\b|\bhitting\b|\bgroundstroke\b|\bbjj\b|\bmuay\b|\bboxing\b|\brolling\b/.test(s)) return "moderate";
+
   // Type-based fallback
   if (tt === "game")     return "high";
   if (tt === "strength") return "moderate";
@@ -297,15 +302,28 @@ function extractClaudeJSON(text: string): { sport?: string; schedule?: unknown[]
 
 // ─── Sport normalisation ──────────────────────────────────────────────────────
 function normaliseSport(raw: string | undefined): string {
-  if (!raw) return "running";
+  if (!raw) return "general";
   const s = raw.toLowerCase();
-  if (s.includes("soccer") || s.includes("football"))  return "soccer";
-  if (s.includes("cycling") || s.includes("bike"))     return "cycling";
-  if (s.includes("swim"))                               return "swimming";
-  if (s.includes("strength") || s.includes("lifting")) return "strength";
-  if (s.includes("triathlon") || s.includes("hybrid")) return "hybrid";
-  if (s.includes("running") || s.includes("marathon") || s.includes("run")) return "running";
-  return s.trim() || "running";
+  if (/soccer|football(?!\s*american)/.test(s))             return "soccer";
+  if (/american\s*football|\bnfl\b|\bfootball\b/.test(s))   return "football";
+  if (/basketball|\bnba\b|\bhoops\b/.test(s))               return "basketball";
+  if (/baseball|\bmlb\b|\bsoftball\b/.test(s))              return "baseball";
+  if (/hockey|\bnhl\b|\bice\s*hockey\b|\bfield\s*hockey\b/.test(s)) return "hockey";
+  if (/rugby|union|league/.test(s))                         return "rugby";
+  if (/volleyball|\bvb\b/.test(s))                          return "volleyball";
+  if (/lacrosse/.test(s))                                   return "lacrosse";
+  if (/tennis|\bwta\b|\batp\b/.test(s))                     return "tennis";
+  if (/mma|combat|martial|boxing|muay|bjj|wrestling|judo|grappling/.test(s)) return "mma";
+  if (/crossfit|cross.fit/.test(s))                         return "crossfit";
+  if (/triathlon/.test(s))                                  return "triathlon";
+  if (/swim/.test(s))                                       return "swimming";
+  if (/cycl|bike|cycling|criterium|velodrome/.test(s))      return "cycling";
+  if (/strength|lifting|powerlifting|weightlifting/.test(s)) return "strength";
+  if (/run|marathon|5k|10k|half|trail/.test(s))             return "running";
+  if (/hybrid|cross.train/.test(s))                         return "hybrid";
+  if (/climb|bouldering/.test(s))                           return "climbing";
+  if (/row|rowing|crew/.test(s))                            return "rowing";
+  return s.trim() || "general";
 }
 
 // ─── Claude prompt ─────────────────────────────────────────────────────────────
@@ -315,7 +333,7 @@ function buildPrompt(text: string, today: string): string {
   return `Today's date is ${today}. Parse the training document below into this exact JSON structure:
 
 {
-  "sport": "<running|cycling|swimming|soccer|strength|triathlon|hybrid>",
+  "sport": "<running|cycling|swimming|soccer|football|basketball|baseball|hockey|rugby|volleyball|lacrosse|tennis|mma|crossfit|triathlon|strength|rowing|climbing|hybrid|general>",
   "schedule": [
     {
       "day":              "<Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday>",
@@ -332,29 +350,52 @@ function buildPrompt(text: string, today: string): string {
 }
 
 ━━━ SPORT DETECTION ━━━
-running/marathon/5K/10K/half marathon → "running"
-cycling/bike/criterium/velodrome → "cycling"
-swimming/swim/triathlon → "triathlon"
-soccer/football → "soccer"
-weights/lifting/powerlifting → "strength"
-mixed/cross-training → "hybrid"
+running/marathon/5K/10K/half marathon/trail → "running"
+cycling/bike/criterium/velodrome            → "cycling"
+swimming/swim                               → "swimming"
+triathlon                                   → "triathlon"
+soccer/football (non-American)              → "soccer"
+American football/NFL/gridiron              → "football"
+basketball/hoops/NBA                        → "basketball"
+baseball/softball/MLB                       → "baseball"
+hockey/NHL/field hockey/ice hockey          → "hockey"
+rugby/union/league                          → "rugby"
+volleyball                                  → "volleyball"
+lacrosse                                    → "lacrosse"
+tennis/WTA/ATP/racquet                      → "tennis"
+MMA/boxing/Muay Thai/BJJ/combat/wrestling   → "mma"
+CrossFit/WOD/MetCon                         → "crossfit"
+weights/lifting/powerlifting                → "strength"
+rowing/crew                                 → "rowing"
+climbing/bouldering                         → "climbing"
+mixed/cross-training                        → "hybrid"
+anything else                               → "general"
 
 ━━━ TYPE + CATEGORY MAPPING ━━━
-"Run 5 miles" / "Easy jog" / "Bike 30 min"                      → type:"Run",      category:"cardio"
-"Strength 45 min" / "Gym" / "Lift"                              → type:"Strength", category:"strength"
-"Training" / "Practice" / "Drill" / "Skills" / "Tactical"       → type:"Practice", category:"sport"
-"Game 2h" / "Match" / "Race" / "Competition"                    → type:"Game",     category:"sport"
-"Pre-Game Activation" / "Activation" / "Warm-up"                → type:"Practice", category:"sport"
-"Yoga" / "Stretch" / "Easy" / "Mobility" / "Recovery session"   → type:"Recovery", category:"recovery"
+"Run" / "Easy jog" / "Bike" / "Swim laps" / "Row"               → type:"Run",      category:"cardio"
+"Strength" / "Gym" / "Lift" / "Weights" / "WOD" / "MetCon"     → type:"Strength", category:"strength"
+"Game" / "Match" / "Race" / "Competition" / "Meet" / "Bout"     → type:"Game",     category:"sport"
+"Pre-Game" / "Activation" / "Shoot-Around" / "Warm-Up"          → type:"Practice", category:"sport"
+"Yoga" / "Stretch" / "Mobility" / "Foam Roll" / "Pool Walk"     → type:"Recovery", category:"recovery"
 "Rest" / "Off" / (blank)                                        → type:"Off",      category:"recovery"
 
-CRITICAL: The word "Training" always maps to type:"Practice", category:"sport" — NEVER to type:"Off".
-If a day says "Training (technical + small sided games) 90 min" → type:"Practice", category:"sport", duration_minutes:90, intensity:high
+ANY of these → type:"Practice", category:"sport":
+Training, Practice, Drill, Skills, Session, Workout,
+Tactical, Technical, Positional, Possession, Pressing,
+Conditioning, Finishing, Transition, Set Pieces, Walkthrough,
+Scrimmage, Shoot-Around, Film Session,
+Batting Practice, Bullpen, Fielding,
+Sparring, Pad Work, Grappling, Rolling, BJJ, Boxing,
+Groundstrokes, Serve Practice, Match Play,
+Small-Sided Games, High Press, Build-Out, Shape Work
+
+CRITICAL: "Training" and "Session" and "Workout" and "Practice" are ALWAYS type:"Practice" — NEVER type:"Off".
+If in doubt between Practice and Off, always choose Practice.
 
 ━━━ INTENSITY ━━━
-low      → Easy, jog, walk, yoga, active recovery, rest
-moderate → Tempo, long run, marathon pace, practice, threshold, steady
-high     → Intervals, speed work, race, heavy lift, game, sprint, fartlek
+low      → Easy, light, jog, walk, yoga, stretch, mobility, activation, shoot-around, walkthrough, film, deload, pool walk, foam rolling
+moderate → Tempo, long run, marathon pace, threshold, tactical, technical, possession, batting practice, groundstrokes, BJJ/rolling, steady
+high     → Intervals, speed, game, match, race, bout, fight, sparring, pad work, sprint, fartlek, conditioning, small-sided games, high press, WOD, MetCon, AMRAP, game-speed
 
 ━━━ DURATION ━━━
 Parse any format: "2h" = 120, "1h 15min" = 75, "45 min" = 45, "1:30" = 90.
@@ -419,31 +460,63 @@ const DURATION_RE = /(\d+)\s*h(?:our)?s?\s*(\d+)?\s*m?i?n?|(\d+)\s*m(?:in(?:utes
 
 // Subtype keyword → subtype label
 const SUBTYPE_MAP: [RegExp, string][] = [
-  // Running subtypes
-  [/long\s*run/i,           "Long Run"],
-  [/tempo/i,                "Tempo Run"],
-  [/interval|speed\s*work/i,"Intervals"],
-  [/hill/i,                 "Hill Run"],
-  [/fartlek/i,              "Fartlek"],
-  [/easy\s*run|easy\s*jog/i,"Easy Run"],
-  [/recovery\s*run/i,       "Recovery Run"],
-  // Strength subtypes
-  [/full\s*body/i,          "Full Body"],
-  [/upper\s*body/i,         "Upper Body"],
-  [/lower\s*body/i,         "Lower Body"],
-  // Recovery / mobility
-  [/yoga/i,                 "Yoga"],
-  [/mobility|stretch/i,     "Mobility"],
-  // Soccer / team sport subtypes
-  [/pre.?game|activation/i, "Pre-Game Activation"],
-  [/small\s*sided|ssg/i,    "Small-Sided Games"],
-  [/tactical|shape|positional/i, "Tactical Training"],
-  [/technical|finishing|passing/i, "Technical Training"],
-  [/possession/i,           "Possession Play"],
-  [/set\s*piece/i,          "Set Pieces"],
-  [/pressing|press/i,       "High Press Drills"],
-  [/conditioning/i,         "Conditioning"],
-  [/walkthrough/i,          "Walkthrough"],
+  // ── Running ──────────────────────────────────────────────────────────────────
+  [/long\s*run/i,                    "Long Run"],
+  [/tempo/i,                         "Tempo Run"],
+  [/interval|speed\s*work/i,         "Intervals"],
+  [/hill/i,                          "Hill Run"],
+  [/fartlek/i,                       "Fartlek"],
+  [/easy\s*run|easy\s*jog/i,         "Easy Run"],
+  [/recovery\s*run/i,                "Recovery Run"],
+  [/time\s*trial/i,                  "Time Trial"],
+  [/track\s*workout/i,               "Track Workout"],
+  // ── Strength ─────────────────────────────────────────────────────────────────
+  [/full\s*body/i,                   "Full Body"],
+  [/upper\s*body/i,                  "Upper Body"],
+  [/lower\s*body/i,                  "Lower Body"],
+  [/olympic\s*lift|snatch|clean/i,   "Olympic Lifting"],
+  [/plyometric|plyo/i,               "Plyometrics"],
+  // ── Recovery / mobility ───────────────────────────────────────────────────────
+  [/yoga/i,                          "Yoga"],
+  [/mobility|stretch/i,              "Mobility"],
+  [/foam\s*roll/i,                   "Foam Rolling"],
+  [/pool\s*walk|pool\s*recovery/i,   "Pool Recovery"],
+  // ── Soccer / football / rugby / hockey (team field sports) ───────────────────
+  [/pre.?game|activation/i,          "Pre-Game Activation"],
+  [/small\s*sided|ssg/i,             "Small-Sided Games"],
+  [/tactical|shape|positional/i,     "Tactical Training"],
+  [/technical|finishing|passing/i,   "Technical Training"],
+  [/possession/i,                    "Possession Play"],
+  [/set\s*piece/i,                   "Set Pieces"],
+  [/pressing|high\s*press/i,         "High Press Drills"],
+  [/conditioning/i,                  "Conditioning"],
+  [/walkthrough|walk.through/i,      "Walkthrough"],
+  [/transition\s*play/i,             "Transition Play"],
+  [/build\s*out/i,                   "Build-Out Play"],
+  // ── Basketball ───────────────────────────────────────────────────────────────
+  [/shoot.?around/i,                 "Shoot-Around"],
+  [/film\s*session|video\s*session/i,"Film Session"],
+  [/scrimmage/i,                     "Scrimmage"],
+  // ── Baseball / softball ───────────────────────────────────────────────────────
+  [/batting\s*practice|bp\b/i,       "Batting Practice"],
+  [/bullpen/i,                       "Bullpen Session"],
+  [/fielding/i,                      "Fielding Drills"],
+  [/infield|outfield/i,              "Fielding Drills"],
+  // ── MMA / combat sports ───────────────────────────────────────────────────────
+  [/sparring/i,                      "Sparring"],
+  [/pad\s*work/i,                    "Pad Work"],
+  [/grappling|rolling|bjj/i,         "Grappling"],
+  [/muay\s*thai/i,                   "Muay Thai Drills"],
+  [/boxing\s*drill/i,                "Boxing Drills"],
+  // ── Tennis / racquet sports ───────────────────────────────────────────────────
+  [/groundstroke|baseline\s*drill/i, "Groundstroke Drills"],
+  [/serve\s*practice/i,              "Serve Practice"],
+  [/match\s*play/i,                  "Match Play"],
+  // ── CrossFit ─────────────────────────────────────────────────────────────────
+  [/\bwod\b|metcon|amrap|emom/i,     "WOD / MetCon"],
+  // ── Swimming ─────────────────────────────────────────────────────────────────
+  [/swim\s*drill|technique\s*work/i, "Swim Drills"],
+  [/open\s*water/i,                  "Open Water"],
 ];
 
 function detectSubtype(text: string): string | undefined {
