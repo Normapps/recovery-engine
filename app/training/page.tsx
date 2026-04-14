@@ -611,6 +611,18 @@ export default function TrainingPage() {
           {trainingPlan!.weeklySchedule.map((d) => {
             const color   = TYPE_COLOR[d.training_type];
             const isToday = d.day === todayDay;
+
+            // Build the metric string: "10 miles · 110 min" or "10 miles" or "45 min"
+            const distStr = d.distance !== undefined
+              ? `${d.distance} ${d.distanceUnit === "km" ? "km" : "miles"}`
+              : null;
+            const durStr = d.duration > 0 ? formatDuration(d.duration) : null;
+            const metric = d.training_type === "off"
+              ? "Rest"
+              : distStr && durStr
+                ? `${distStr} · ${durStr}`
+                : distStr ?? durStr ?? "—";
+
             return (
               <div
                 key={d.day}
@@ -622,20 +634,22 @@ export default function TrainingPage() {
                   className="w-2 h-2 rounded-full shrink-0"
                   style={{ backgroundColor: color }}
                 />
+                {/* Full day name */}
                 <span
-                  className={`w-24 text-xs font-semibold ${
+                  className={`w-28 text-xs font-semibold shrink-0 ${
                     isToday ? "text-gold" : "text-text-secondary"
                   }`}
                 >
-                  {d.day.slice(0, 3)}{isToday && <span className="text-2xs ml-1 text-gold/70">TODAY</span>}
+                  {d.day}
+                  {isToday && <span className="text-2xs ml-1 text-gold/70">TODAY</span>}
                 </span>
+                {/* Subtype or type label */}
                 <span className="flex-1 text-sm font-semibold text-text-primary">
                   {d.subtype ?? TYPE_LABEL[d.training_type]}
                 </span>
-                <span className="text-xs text-text-muted tabular-nums">
-                  {d.distance !== undefined
-                    ? `${d.distance} ${d.distanceUnit ?? "mi"}`
-                    : formatDuration(d.duration)}
+                {/* Distance / duration */}
+                <span className="text-xs text-text-muted tabular-nums text-right">
+                  {metric}
                 </span>
               </div>
             );
