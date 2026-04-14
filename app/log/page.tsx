@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import DailyLogForm from "@/components/forms/DailyLogForm";
 import ConnectedDevices from "@/components/devices/ConnectedDevices";
 import { format } from "date-fns";
@@ -23,7 +24,9 @@ export default function LogPage() {
       </div>
 
       {/* Connected devices — auto-import section */}
-      <ConnectedDevices />
+      <Suspense fallback={null}>
+        <ConnectedDevices />
+      </Suspense>
 
       <p className="text-xs text-text-secondary leading-relaxed">
         Enter your data below or import from a connected device above. Incomplete entries will be
