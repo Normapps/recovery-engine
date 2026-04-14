@@ -1,5 +1,10 @@
+// Force Node.js runtime — required for pdf-parse (Buffer APIs, fs access).
+// Must NOT run in Edge Runtime.
+export const runtime = "nodejs";
+
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
+import pdf from "pdf-parse";
 import type { TrainingDay, WeekDay, TrainingType, IntensityLevel } from "@/lib/types";
 
 const client = new Anthropic();
@@ -97,18 +102,11 @@ export async function POST(req: NextRequest) {
     rawText = await file.text();
   } else if (fileName.endsWith(".pdf") || mimeType === "application/pdf") {
     try {
-      // pdf-parse v1 — classic function API: pdf(buffer) → { text, numpages, ... }
-      // Require via lib path to avoid Next.js test-environment trigger in index.js
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const pdf = require("pdf-parse/lib/pdf-parse") as (
-        buffer: Buffer
-      ) => Promise<{ text: string; numpages: number }>;
-
       const buffer = Buffer.from(await file.arrayBuffer());
       const data   = await pdf(buffer);
       const text   = data.text;
 
-      console.log("[parse-training-plan] Extracted PDF text:", text.slice(0, 500));
+      console.log("Extracted training text:", text.slice(0, 500));
 
       if (!text.trim()) {
         return NextResponse.json(
