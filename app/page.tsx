@@ -11,7 +11,7 @@ import RecoveryScoreRing from "@/components/ui/RecoveryScoreRing";
 import ScoreOverride from "@/components/ui/ScoreOverride";
 import {
   Moon, Zap, Dumbbell, Utensils, FlaskConical,
-  ChevronRight, TrendingUp, PlusCircle, X,
+  ChevronRight, TrendingUp, PlusCircle, X, Check,
 } from "lucide-react";
 import { analyzeBloodwork } from "@/lib/bloodwork-engine";
 import {
@@ -19,7 +19,8 @@ import {
   buildUnifiedInput,
   type ModalityRecommendation,
 } from "@/lib/modality-recommendations";
-import { upsertDailyCheckin } from "@/lib/supabase";
+import { upsertDailyCheckin, upsertTaskCompletion } from "@/lib/supabase";
+import { type DailyTaskCompletion, TASK_XP } from "@/lib/types";
 import { generateDailyPlan, type DailyPlan } from "@/lib/daily-plan";
 import { generatePlanDetails, type PlanSection, type NutritionSection, type PlanDetails } from "@/lib/plan-details";
 import {
@@ -29,6 +30,7 @@ import {
   type AIMobilityProtocol,
   type AINutritionProtocol,
 } from "@/lib/ai-prescriptions";
+import { computeDashboardReadiness } from "@/lib/scoring-pipeline";
 import {
   getTodayDay, getTomorrowDay, getDayPlan, TYPE_COLOR, TYPE_LABEL,
 } from "@/lib/training-engine";
@@ -546,6 +548,114 @@ function AINutritionModal({
   );
 }
 
+// ─── Completed Tasks card ────────────────────────────────────────────────
+
+type TaskKey = keyof Omit<DailyTaskCompletion, "date">;
+
+const TASK_ROWS: Array<{
+  key:     TaskKey;
+  label:   string;
+  icon:    React.ReactNode;
+  always?: true;
+}> = [
+  { key: "training_completed",  label: "Training",  icon: <Dumbbell   size={13} />, always: true },
+  { key: "recovery_completed",  label: "Recovery",  icon: <Zap        size={13} />, always: true },
+  { key: "nutrition_completed", label: "Nutrition", icon: <Utensils   size={13} />, always: true },
+  { key: "rehab_completed",     label: "Rehab",     icon: <TrendingUp size={13} /> },
+];
+
+function CompletedTasksCard({
+  date,
+  tasks,
+  showRehab,
+  onToggle,
+}: {
+  date:      string;
+  tasks:     DailyTaskCompletion | null;
+  showRehab: boolean;
+  onToggle:  (task: TaskKey) => void;
+}) {
+  const state: DailyTaskCompletion = tasks ?? {
+    date,
+    training_completed:  false,
+    recovery_completed:  false,
+    nutrition_completed: false,
+    rehab_completed:     false,
+  };
+
+  const completedCount = TASK_ROWS
+    .filter(({ key, always }) => always || showRehab)
+    .filter(({ key }) => state[key])
+    .length;
+
+  const totalXP = completedCount * TASK_XP;
+
+  const visibleRows = TASK_ROWS.filter(({ always }) => always || showRehab);
+
+  return (
+    <div className="bg-bg-card border border-bg-border rounded-2xl p-4 flex flex-col gap-3">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-bold text-text-muted uppercase tracking-widest">
+          Daily Tasks
+        </p>
+        {totalXP > 0 && (
+          <span className="text-2xs font-bold text-gold tabular-nums">
+            +{totalXP} XP
+          </span>
+        )}
+      </div>
+
+      {/* Task rows */}
+      {visibleRows.map(({ key, label, icon }, i) => {
+        const done = state[key];
+        return (
+          <div key={key}>
+            {i > 0 && <div className="h-px bg-bg-border mb-3" />}
+            <button
+              className="w-full text-left"
+              onClick={() => onToggle(key)}
+              aria-pressed={done}
+            >
+              <div className="flex items-center gap-3">
+                {/* Checkbox circle */}
+                <div
+                  className={`h-5 w-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-all ${
+                    done
+                      ? "border-green-500 bg-green-500/20"
+                      : "border-bg-border bg-transparent"
+                  }`}
+                >
+                  {done && <Check size={10} className="text-green-400" strokeWidth={3} />}
+                </div>
+
+                {/* Icon + label */}
+                <span
+                  className={`text-text-muted transition-colors ${done ? "text-green-400/70" : ""}`}
+                >
+                  {icon}
+                </span>
+                <span
+                  className={`text-xs font-semibold uppercase tracking-wider transition-colors ${
+                    done ? "text-green-400 line-through decoration-green-400/40" : "text-text-secondary"
+                  }`}
+                >
+                  {label}
+                </span>
+
+                {/* XP badge */}
+                <span className="ml-auto text-2xs font-bold tabular-nums text-text-muted">
+                  +{TASK_XP} XP
+                </span>
+              </div>
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─── Today's Plan card ───────────────────────────────────────────────────
 
 const PLAN_SECTIONS: Array<{
@@ -667,6 +777,32 @@ function DashboardContent({
 }) {
   const { breakdown, confidence } = todayScore;
 
+  // ── Daily tasks ───────────────────────────────────────────────────────────
+  const taskLog    = useStore((s) => s.taskLog);
+  const toggleTask = useStore((s) => s.toggleTask);
+  const dateKey    = todayScore.date; // YYYY-MM-DD
+  const todayTasks = taskLog[dateKey] ?? null;
+
+  const handleToggleTask = (task: TaskKey) => {
+    toggleTask(dateKey, task);
+    // Compute optimistic updated state for Supabase (the store update is async)
+    const base: DailyTaskCompletion = todayTasks ?? {
+      date:                dateKey,
+      training_completed:  false,
+      recovery_completed:  false,
+      nutrition_completed: false,
+      rehab_completed:     false,
+    };
+    const updated = { ...base, [task]: !base[task] };
+    upsertTaskCompletion(
+      dateKey,
+      updated.training_completed,
+      updated.recovery_completed,
+      updated.nutrition_completed,
+      updated.rehab_completed,
+    );
+  };
+
   // ── Labs analysis ─────────────────────────────────────────────────────
   const bwAnalysis = latestBloodwork ? analyzeBloodwork(latestBloodwork.panel) : null;
 
@@ -703,6 +839,23 @@ function DashboardContent({
     todayMood,
   );
   const unified = unifiedRecoveryEngine(unifiedInput);
+
+  // ── Readiness score — ability to perform TODAY ───────────────────────────
+  // Derived from displayScore + load, soreness, HRV trend, and sleep quality.
+  // Uses data already present in DashboardContent; no extra store read needed.
+  const AU_SOFT_CAP  = 600;
+  const AU_MULT: Record<string, number> = { low: 3, moderate: 5, high: 8 };
+  const todayAU    = todayPlan    && todayPlan.training_type    !== "off" ? todayPlan.duration    * AU_MULT[todayPlan.intensity]    : 0;
+  const tomorrowAU = tomorrowPlan && tomorrowPlan.training_type !== "off" ? tomorrowPlan.duration * AU_MULT[tomorrowPlan.intensity] : 0;
+
+  const { readiness_score: readinessScore } = computeDashboardReadiness({
+    recovery_score:      displayScore,
+    load_today_score:    Math.min(100, Math.round((todayAU    / AU_SOFT_CAP) * 100)),
+    load_tomorrow_score: Math.min(100, Math.round((tomorrowAU / AU_SOFT_CAP) * 100)),
+    soreness:            unifiedInput.soreness,
+    hrv_score:           breakdown.hrv,
+    sleep_quality:       todayEntry.sleep.qualityRating ?? null,
+  });
 
   const coachMessage   = generateCoachMessage(todayScore, coachMode);
   const dailyPlan      = generateDailyPlan(displayScore, todayMood, todayPlan ?? null, todayEntry);
@@ -780,9 +933,10 @@ function DashboardContent({
         </Link>
       </div>
 
-      {/* ── Score ring ──────────────────────────────────────────────────── */}
-      <div className="flex justify-center">
-        <RecoveryScoreRing score={displayScore} confidence={confidence} size={240} animated />
+      {/* ── Score rings ─────────────────────────────────────────────────── */}
+      <div className="flex flex-col sm:flex-row items-center justify-center gap-6">
+        <RecoveryScoreRing score={displayScore}   confidence={confidence} size={200} animated         label="Recovery"  colorVariant="muted" />
+        <RecoveryScoreRing score={readinessScore} confidence={confidence} size={200} animated={false} label="Readiness" colorVariant="muted" />
       </div>
 
       {/* ── Override ────────────────────────────────────────────────────── */}
@@ -813,6 +967,14 @@ function DashboardContent({
 
       {/* ── Today's Plan ────────────────────────────────────────────────── */}
       <TodaysPlanCard plan={dailyPlan} details={planDetails} />
+
+      {/* ── Daily Tasks ─────────────────────────────────────────────────── */}
+      <CompletedTasksCard
+        date={dateKey}
+        tasks={todayTasks}
+        showRehab={false}
+        onToggle={handleToggleTask}
+      />
 
       {/* ── Score breakdown ─────────────────────────────────────────────── */}
       <div>
