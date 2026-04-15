@@ -10,7 +10,7 @@ import RecoveryScoreRing from "@/components/ui/RecoveryScoreRing";
 import ScoreOverride from "@/components/ui/ScoreOverride";
 import {
   Moon, Zap, Dumbbell, Utensils, FlaskConical,
-  ChevronRight, TrendingUp, PlusCircle, X, Check,
+  ChevronRight, ChevronDown, TrendingUp, PlusCircle, X, Check,
 } from "lucide-react";
 import { analyzeBloodwork } from "@/lib/bloodwork-engine";
 import {
@@ -921,8 +921,23 @@ export default function Dashboard() {
     upsertDailyCheckin(todayKey, v);
   };
 
-  // ── No data today → render baseline state (never show empty screen) ──────
-  if (!todayScore || !todayEntry) {
+  // ── State routing ─────────────────────────────────────────────────────────
+  //
+  //  NEW USER     → no profile AND no score history AND no today entry
+  //  BASELINE     → some context exists (profile OR history) but nothing logged today
+  //  ACTIVE USER  → today's score + entry are both present
+  //
+  const hasHistory   = Object.keys(scores).length > 0;
+  const isNewUser    = !performanceProfile && !hasHistory && !todayEntry;
+  const isBaseline   = !isNewUser && (!todayScore || !todayEntry);
+
+  // ── 1. NEW USER ───────────────────────────────────────────────────────────
+  if (isNewUser) {
+    return <NewUserState today={today} trainingPlan={trainingPlan} />;
+  }
+
+  // ── 2. BASELINE (profile/history exists, nothing logged today) ────────────
+  if (isBaseline) {
     const bwAnalysis   = latestBloodwork ? analyzeBloodwork(latestBloodwork.panel) : null;
     const bwModifier   = bwAnalysis?.recoveryModifier ?? 0;
     const todayDay     = getTodayDay();
@@ -949,10 +964,11 @@ export default function Dashboard() {
     );
   }
 
+  // ── 3. ACTIVE USER ────────────────────────────────────────────────────────
   return (
     <DashboardContent
-      todayScore={todayScore}
-      todayEntry={todayEntry}
+      todayScore={todayScore!}
+      todayEntry={todayEntry!}
       coachMode={coachingPrefs.mode}
       today={today}
       latestBloodwork={latestBloodwork}
@@ -1478,6 +1494,210 @@ function DashboardContent({
 
       {/* ── Execution toast ─────────────────────────────────────────────── */}
       <ExecutionToast visible={executionToastVisible} />
+
+    </div>
+  );
+}
+
+// ─── New user onboarding state ────────────────────────────────────────────────
+
+const SCORE_INPUTS = [
+  {
+    icon: <Moon      size={18} />,
+    label:  "Sleep",
+    color:  "text-violet-400",
+    border: "border-violet-500/20",
+    bg:     "bg-violet-500/8",
+    desc:   "Duration, HRV, and resting heart rate tell us how well you recovered overnight.",
+  },
+  {
+    icon: <Zap       size={18} />,
+    label:  "HRV",
+    color:  "text-pink-400",
+    border: "border-pink-500/20",
+    bg:     "bg-pink-500/8",
+    desc:   "Heart rate variability is the single strongest predictor of readiness to train.",
+  },
+  {
+    icon: <Dumbbell  size={18} />,
+    label:  "Training",
+    color:  "text-amber-400",
+    border: "border-amber-500/20",
+    bg:     "bg-amber-500/8",
+    desc:   "Volume, intensity, and load balance determine how much your body needs to adapt.",
+  },
+  {
+    icon: <Utensils  size={18} />,
+    label:  "Nutrition",
+    color:  "text-emerald-400",
+    border: "border-emerald-500/20",
+    bg:     "bg-emerald-500/8",
+    desc:   "Calories, protein, and hydration fuel both performance and recovery.",
+  },
+] as const;
+
+function NewUserState({
+  today,
+  trainingPlan,
+}: {
+  today:        string;
+  trainingPlan: TrainingPlan | null;
+}) {
+  const [expanded, setExpanded] = useState<number | null>(null);
+
+  return (
+    <div className="flex flex-col gap-5 animate-fade-in">
+
+      {/* ── Header ────────────────────────────────────────────────────────── */}
+      <div>
+        <h1 className="text-xl font-bold text-text-primary">Recovery Engine</h1>
+        <p className="text-xs text-text-muted mt-0.5 uppercase tracking-wider">{today}</p>
+      </div>
+
+      {/* ── Score placeholder ─────────────────────────────────────────────── */}
+      <div className="flex flex-col items-center gap-3 py-4">
+        {/* Dashed ring placeholder */}
+        <div className="relative w-44 h-44">
+          {/* Outer glow */}
+          <div className="absolute inset-0 rounded-full bg-gold/4" />
+          {/* Ring */}
+          <svg className="w-full h-full -rotate-90" viewBox="0 0 160 160">
+            <circle
+              cx="80" cy="80" r="68"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="6"
+              strokeDasharray="8 6"
+              className="text-bg-border"
+            />
+          </svg>
+          {/* Center content */}
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-1">
+            <span className="text-4xl font-extrabold text-text-muted/25">—</span>
+            <span className="text-[10px] font-bold uppercase tracking-widest text-text-muted/40">
+              No Score Yet
+            </span>
+          </div>
+        </div>
+
+        <div className="text-center">
+          <h2 className="text-base font-bold text-text-primary">Build Your Recovery Score</h2>
+          <p className="text-xs text-text-muted mt-1 leading-relaxed max-w-xs">
+            Your score is calculated from four inputs. Connect a device or log your first entry to get started.
+          </p>
+        </div>
+      </div>
+
+      {/* ── Score input explanations ──────────────────────────────────────── */}
+      <div>
+        <p className="text-[10px] font-bold text-text-secondary uppercase tracking-widest mb-3">
+          Your score is built from
+        </p>
+        <div className="flex flex-col gap-2">
+          {SCORE_INPUTS.map((input, i) => (
+            <button
+              key={input.label}
+              onClick={() => setExpanded(expanded === i ? null : i)}
+              className={`w-full text-left rounded-2xl border p-4 transition-all ${input.border} ${
+                expanded === i ? input.bg : "bg-bg-card hover:bg-bg-elevated"
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <span className={input.color}>{input.icon}</span>
+                <span className="flex-1 text-sm font-semibold text-text-primary">{input.label}</span>
+                <ChevronDown
+                  size={14}
+                  className={`text-text-muted transition-transform duration-200 ${
+                    expanded === i ? "rotate-180" : ""
+                  }`}
+                />
+              </div>
+              {expanded === i && (
+                <p className="text-xs text-text-muted leading-relaxed mt-2.5 pl-[34px]">
+                  {input.desc}
+                </p>
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ── CTAs ──────────────────────────────────────────────────────────── */}
+      <div className="flex flex-col gap-3">
+        <p className="text-[10px] font-bold text-text-secondary uppercase tracking-widest">
+          Get started
+        </p>
+
+        {/* Primary: Log data */}
+        <Link
+          href="/log"
+          className="w-full py-4 rounded-2xl bg-gold text-bg-primary text-sm font-bold uppercase tracking-wider text-center hover:bg-gold-light transition-colors block"
+        >
+          Log Today's Data
+        </Link>
+
+        {/* Secondary: Connect device */}
+        <Link
+          href="/log"
+          className="flex items-center justify-between bg-bg-card border border-bg-border rounded-2xl px-4 py-3.5 hover:border-text-muted/40 transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-bg-elevated flex items-center justify-center">
+              <Zap size={16} className="text-gold" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-text-primary">Connect a Device</p>
+              <p className="text-xs text-text-muted mt-0.5">WHOOP, Garmin, Oura, Apple Watch…</p>
+            </div>
+          </div>
+          <ChevronRight size={16} className="text-text-muted shrink-0" />
+        </Link>
+
+        {/* Tertiary: Upload training plan */}
+        <Link
+          href="/training"
+          className="flex items-center justify-between bg-bg-card border border-bg-border rounded-2xl px-4 py-3.5 hover:border-text-muted/40 transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-bg-elevated flex items-center justify-center">
+              <Dumbbell size={16} className="text-text-secondary" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-text-primary">
+                {trainingPlan ? "View Training Plan" : "Upload Training Plan"}
+              </p>
+              <p className="text-xs text-text-muted mt-0.5">
+                {trainingPlan
+                  ? "Training plan connected — score will use it"
+                  : "PDF or manual entry — improves score accuracy"}
+              </p>
+            </div>
+          </div>
+          <ChevronRight size={16} className="text-text-muted shrink-0" />
+        </Link>
+
+        {/* Profile shortcut */}
+        <Link
+          href="/profile"
+          className="flex items-center justify-between bg-bg-card border border-bg-border rounded-2xl px-4 py-3.5 hover:border-text-muted/40 transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-bg-elevated flex items-center justify-center">
+              <TrendingUp size={16} className="text-text-secondary" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-text-primary">Set Up Athlete Profile</p>
+              <p className="text-xs text-text-muted mt-0.5">Sport, age, and goals personalise your score</p>
+            </div>
+          </div>
+          <ChevronRight size={16} className="text-text-muted shrink-0" />
+        </Link>
+      </div>
+
+      {/* ── Footer note ───────────────────────────────────────────────────── */}
+      <p className="text-[10px] text-text-muted/50 text-center leading-relaxed pb-2">
+        Your score updates each time you log data. The more inputs you provide, the higher the confidence.
+      </p>
 
     </div>
   );
