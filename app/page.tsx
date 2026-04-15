@@ -1258,7 +1258,19 @@ function DashboardContent({
         adjustedScore={todayScore.adjustedScore}
       />
 
-      {/* Coach insight — short, reads as the score's explanation */}
+      {/* ══════════════════════════════════════════════════════════════════
+          2. HOW DO YOU FEEL TODAY — immediately below score
+          ══════════════════════════════════════════════════════════════════ */}
+      <div className="flex flex-col gap-1.5">
+        <p className="text-[10px] font-bold text-text-muted uppercase tracking-widest text-center">
+          How do you feel compared to your score?
+        </p>
+        <MoodPicker value={todayMood} onChange={onMoodChange} />
+      </div>
+
+      {/* ══════════════════════════════════════════════════════════════════
+          3. COACH INSIGHT — score explanation
+          ══════════════════════════════════════════════════════════════════ */}
       <div className="bg-bg-card border border-bg-border rounded-2xl p-4">
         <div className="flex items-center gap-2 mb-2">
           <span
@@ -1278,7 +1290,7 @@ function DashboardContent({
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════
-          2. WHAT YOU SHOULD DO TODAY — primary action card (above the fold)
+          4. WHAT YOU SHOULD DO TODAY — primary action card
           ══════════════════════════════════════════════════════════════════ */}
       <div className="bg-bg-card border border-gold/20 rounded-2xl p-4 flex flex-col gap-3">
         <div className="flex items-center justify-between">
@@ -1297,7 +1309,7 @@ function DashboardContent({
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════
-          3. TODAY'S PLAN — training / recovery / mobility
+          5. TODAY'S PLAN — training / recovery / mobility
           ══════════════════════════════════════════════════════════════════ */}
       <TodaysPlanCard
         plan={dailyPlan}
@@ -1307,11 +1319,8 @@ function DashboardContent({
       />
 
       {/* ══════════════════════════════════════════════════════════════════
-          4. SUPPORTING DATA — lower priority
+          6. SUPPORTING DATA — lower priority
           ══════════════════════════════════════════════════════════════════ */}
-
-      {/* Mood + feel context */}
-      <MoodPicker value={todayMood} onChange={onMoodChange} />
 
       {(sorenessText || energyText) && (
         <div className="flex items-center gap-2 flex-wrap">
@@ -1695,6 +1704,14 @@ function BaselineState({
         </p>
       </div>
 
+      {/* ── How do you feel today? ────────────────────────────────────────── */}
+      <div className="flex flex-col gap-1.5">
+        <p className="text-[10px] font-bold text-text-muted uppercase tracking-widest text-center">
+          How do you feel compared to your score?
+        </p>
+        <MoodPicker value={todayMood} onChange={onMoodChange} />
+      </div>
+
       {/* ── Coach insight ─────────────────────────────────────────────────── */}
       <div className="bg-bg-card border border-bg-border rounded-2xl p-4">
         <div className="flex items-center gap-2 mb-2">
@@ -1736,9 +1753,6 @@ function BaselineState({
         tasks={storedPlanTasks ?? []}
         onToggle={handleTogglePlanTask}
       />
-
-      {/* ── Mood picker ───────────────────────────────────────────────────── */}
-      <MoodPicker value={todayMood} onChange={onMoodChange} />
 
       {/* ── Training impact (if plan exists) ─────────────────────────────── */}
       {trainingPlan && (
