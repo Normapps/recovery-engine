@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { format } from "date-fns";
+import { format, subDays } from "date-fns";
 import Link from "next/link";
 import { useStore, useLatestBloodwork } from "@/lib/store";
 import { getEffectiveScore } from "@/lib/recovery-engine";
@@ -33,7 +33,7 @@ import { computeDashboardReadiness } from "@/lib/scoring-pipeline";
 import {
   getTodayDay, getTomorrowDay, getDayPlan, TYPE_COLOR, TYPE_LABEL,
 } from "@/lib/training-engine";
-import type { RecoveryScore, DailyEntry, TrainingPlan } from "@/lib/types";
+import type { RecoveryScore, DailyEntry, TrainingPlan, TrainingDay, PerformanceProfile } from "@/lib/types";
 
 // ─── Breakdown card ──────────────────────────────────────────────────────
 
@@ -644,6 +644,99 @@ function useExecutionToast(tasks: PlanTaskItem[], dateKey: string): boolean {
   return toastVisible;
 }
 
+// ─── Baseline score computation ──────────────────────────────────────────────
+
+/**
+ * Derives an estimated recovery score for days where no data has been logged.
+ *
+ * Priority chain:
+ *   1. Most recent past score (decayed −1 pt/day, max −7)
+ *   2. Training plan context adjustment (rest +2, game −5, high-intensity −3)
+ *   3. Bloodwork modifier (partial: ×0.3 to avoid over-weighting stale labs)
+ *   4. Default (65) when no history at all
+ */
+interface BaselineResult {
+  score:          number;
+  breakdown:      import("@/lib/types").ScoreBreakdown;
+  readinessLabel: string;
+  yesterdayScore: number | null;
+  delta:          number | null;
+  daysAgo:        number;
+  hasHistory:     boolean;
+}
+
+function computeBaselineScore(
+  scores:      Record<string, RecoveryScore>,
+  todayKey:    string,
+  bwModifier:  number,
+  todayPlan:   TrainingDay | null,
+): BaselineResult {
+  const DEFAULT_BREAKDOWN = { sleep: 60, hrv: 60, training: 60, nutrition: 60, modalities: 60 };
+
+  // Sort all non-today scores newest first
+  const past = Object.values(scores)
+    .filter((s) => s.date !== todayKey)
+    .sort((a, b) => b.date.localeCompare(a.date));
+
+  const yesterdayKey   = format(subDays(new Date(), 1), "yyyy-MM-dd");
+  const yesterdayEntry = scores[yesterdayKey] ?? null;
+  const yesterdayScore = yesterdayEntry
+    ? Math.round(yesterdayEntry.adjustedScore ?? yesterdayEntry.calculatedScore)
+    : null;
+
+  if (past.length === 0) {
+    return {
+      score: 65,
+      breakdown: DEFAULT_BREAKDOWN,
+      readinessLabel: "MODERATE",
+      yesterdayScore: null,
+      delta: null,
+      daysAgo: 0,
+      hasHistory: false,
+    };
+  }
+
+  const latest     = past[0];
+  const rawLatest  = Math.round(latest.adjustedScore ?? latest.calculatedScore);
+  const latestDate = new Date(latest.date + "T12:00:00");
+  const todayDate  = new Date(todayKey    + "T12:00:00");
+  const daysAgo    = Math.max(0, Math.round((todayDate.getTime() - latestDate.getTime()) / 86400000));
+
+  // Decay: −1 pt per day capped at 7 days
+  const decay = -Math.min(daysAgo, 7);
+
+  // Training context delta
+  let trainingDelta = 0;
+  if (todayPlan) {
+    if      (todayPlan.training_type === "game") trainingDelta = -5;
+    else if (todayPlan.training_type === "off")  trainingDelta = +2;
+    else if (todayPlan.intensity     === "high") trainingDelta = -3;
+    else if (todayPlan.intensity === "moderate") trainingDelta = -1;
+  }
+
+  // Bloodwork: partial influence only (stale lab data shouldn't dominate)
+  const bwDelta = Math.round(bwModifier * 0.3);
+
+  const score = Math.max(15, Math.min(100, rawLatest + decay + trainingDelta + bwDelta));
+
+  const readinessLabel =
+    score >= 80 ? "OPTIMAL"  :
+    score >= 65 ? "GOOD"     :
+    score >= 45 ? "CAUTION"  : "FATIGUED";
+
+  const delta = yesterdayScore !== null ? score - yesterdayScore : null;
+
+  return {
+    score,
+    breakdown:  latest.breakdown ?? DEFAULT_BREAKDOWN,
+    readinessLabel,
+    yesterdayScore,
+    delta,
+    daysAgo,
+    hasHistory: true,
+  };
+}
+
 // ─── Plan task helpers ───────────────────────────────────────────────────────
 
 /**
@@ -812,6 +905,7 @@ function TodaysPlanCard({
 export default function Dashboard() {
   const todayScore         = useStore((s) => s.todayScore);
   const todayEntry         = useStore((s) => s.todayEntry);
+  const scores             = useStore((s) => s.scores);
   const coachingPrefs      = useStore((s) => s.coachingPrefs);
   const trainingPlan       = useStore((s) => s.trainingPlan);
   const moodLog            = useStore((s) => s.moodLog);
@@ -822,24 +916,52 @@ export default function Dashboard() {
   const today    = format(new Date(), "EEEE, MMMM d").toUpperCase();
   const todayKey = format(new Date(), "yyyy-MM-dd");
 
+  const handleMoodChange = (v: number) => {
+    setMood(todayKey, v);
+    upsertDailyCheckin(todayKey, v);
+  };
+
+  // ── No data today → render baseline state (never show empty screen) ──────
   if (!todayScore || !todayEntry) {
-    return <EmptyState today={today} />;
+    const bwAnalysis   = latestBloodwork ? analyzeBloodwork(latestBloodwork.panel) : null;
+    const bwModifier   = bwAnalysis?.recoveryModifier ?? 0;
+    const todayDay     = getTodayDay();
+    const tomorrowDay  = getTomorrowDay();
+    const todayPlan    = trainingPlan ? (getDayPlan(trainingPlan, todayDay)    ?? null) : null;
+    const tomorrowPlan = trainingPlan ? (getDayPlan(trainingPlan, tomorrowDay) ?? null) : null;
+    const baseline     = computeBaselineScore(scores, todayKey, bwModifier, todayPlan);
+
+    return (
+      <BaselineState
+        today={today}
+        todayKey={todayKey}
+        baseline={baseline}
+        coachMode={coachingPrefs.mode}
+        trainingPlan={trainingPlan}
+        todayPlan={todayPlan}
+        tomorrowPlan={tomorrowPlan}
+        latestBloodwork={latestBloodwork}
+        bwModifier={bwModifier}
+        todayMood={moodLog[todayKey] ?? null}
+        onMoodChange={handleMoodChange}
+        performanceProfile={performanceProfile}
+      />
+    );
   }
 
-  return <DashboardContent
-    todayScore={todayScore}
-    todayEntry={todayEntry}
-    coachMode={coachingPrefs.mode}
-    today={today}
-    latestBloodwork={latestBloodwork}
-    trainingPlan={trainingPlan}
-    todayMood={moodLog[todayKey] ?? null}
-    performanceProfile={performanceProfile}
-    onMoodChange={(v) => {
-      setMood(todayKey, v);
-      upsertDailyCheckin(todayKey, v); // fire-and-forget; no-ops when Supabase not configured
-    }}
-  />;
+  return (
+    <DashboardContent
+      todayScore={todayScore}
+      todayEntry={todayEntry}
+      coachMode={coachingPrefs.mode}
+      today={today}
+      latestBloodwork={latestBloodwork}
+      trainingPlan={trainingPlan}
+      todayMood={moodLog[todayKey] ?? null}
+      performanceProfile={performanceProfile}
+      onMoodChange={handleMoodChange}
+    />
+  );
 }
 
 function DashboardContent({
@@ -1352,40 +1474,360 @@ function DashboardContent({
   );
 }
 
-// ─── Empty state ──────────────────────────────────────────────────────────
+// ─── Baseline state (no data logged today) ────────────────────────────────────
 
-function EmptyState({ today }: { today: string }) {
+/**
+ * Shown when the user hasn't logged today's data yet.
+ * Computes an estimated score from history + context and shows full
+ * recommendations + plan — the screen is never empty.
+ */
+function BaselineState({
+  today,
+  todayKey,
+  baseline,
+  coachMode,
+  trainingPlan,
+  todayPlan,
+  tomorrowPlan,
+  latestBloodwork,
+  bwModifier,
+  todayMood,
+  onMoodChange,
+  performanceProfile,
+}: {
+  today:             string;
+  todayKey:          string;
+  baseline:          BaselineResult;
+  coachMode:         "hardcore" | "balanced" | "recovery";
+  trainingPlan:      TrainingPlan | null;
+  todayPlan:         TrainingDay | null;
+  tomorrowPlan:      TrainingDay | null;
+  latestBloodwork:   ReturnType<typeof useLatestBloodwork>;
+  bwModifier:        number;
+  todayMood:         number | null;
+  onMoodChange:      (v: number) => void;
+  performanceProfile: PerformanceProfile | null;
+}) {
+  const { score, breakdown, readinessLabel, yesterdayScore, delta, daysAgo, hasHistory } = baseline;
+
+  // Mood adjustment mirrors DashboardContent's psychDelta
+  const psychDelta    = todayMood !== null ? (todayMood - 3) * 7 : 0;
+  const displayScore  = Math.max(0, Math.min(100, Math.round(score + psychDelta)));
+
+  // ── Synthetic entry — needed by engines that expect a DailyEntry ──────────
+  const now = new Date().toISOString();
+  const syntheticEntry: DailyEntry = {
+    id: `baseline-${todayKey}`,
+    date: todayKey,
+    sleep:     { duration: null, hrv: null, restingHR: null, qualityRating: null, bodyBattery: null },
+    nutrition: { calories: null, protein: null, hydration: null, notes: "" },
+    training:  { strengthTraining: false, strengthDuration: null, cardio: false, cardioDuration: null, coreWork: false, mobility: false },
+    recovery:  { sauna: false, iceBath: false, massage: false, stretching: false, compression: false },
+    soreness:   null,
+    energyLevel: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  // ── Recommendations ───────────────────────────────────────────────────────
+  const unifiedInput = buildUnifiedInput(
+    displayScore,
+    breakdown,
+    syntheticEntry,
+    todayPlan,
+    tomorrowPlan,
+    latestBloodwork?.panel ?? null,
+    bwModifier,
+    todayMood,
+    performanceProfile,
+  );
+  const unified         = unifiedRecoveryEngine(unifiedInput);
+  const recommendations = unified.recommended_modalities;
+  const recSummary      = unified.training_impact;
+
+  // ── Readiness score ───────────────────────────────────────────────────────
+  const AU_SOFT_CAP  = 600;
+  const AU_MULT: Record<string, number> = { low: 3, moderate: 5, high: 8 };
+  const todayAU    = todayPlan    && todayPlan.training_type    !== "off" ? todayPlan.duration    * AU_MULT[todayPlan.intensity]    : 0;
+  const tomorrowAU = tomorrowPlan && tomorrowPlan.training_type !== "off" ? tomorrowPlan.duration * AU_MULT[tomorrowPlan.intensity] : 0;
+
+  const { readiness_score: readinessScore } = computeDashboardReadiness({
+    recovery_score:      displayScore,
+    load_today_score:    Math.min(100, Math.round((todayAU    / AU_SOFT_CAP) * 100)),
+    load_tomorrow_score: Math.min(100, Math.round((tomorrowAU / AU_SOFT_CAP) * 100)),
+    soreness:            unifiedInput.soreness,
+    hrv_score:           breakdown.hrv,
+    sleep_quality:       null,
+    intensity_today:    todayPlan    && todayPlan.training_type    !== "off" ? todayPlan.intensity    : undefined,
+    intensity_tomorrow: tomorrowPlan && tomorrowPlan.training_type !== "off" ? tomorrowPlan.intensity : undefined,
+    tomorrow_is_game:   tomorrowPlan?.training_type === "game",
+  });
+
+  // ── Today's Plan ──────────────────────────────────────────────────────────
+  const dailyPlan   = generateDailyPlan(displayScore, todayMood, todayPlan ?? null, syntheticEntry);
+  const planDetails = generatePlanDetails(displayScore, todayMood, todayPlan ?? null, syntheticEntry);
+
+  const planTaskLog    = useStore((s) => s.planTaskLog);
+  const setPlanTaskLog = useStore((s) => s.setPlanTaskLog);
+  const togglePlanTask = useStore((s) => s.togglePlanTask);
+  const storedPlanTasks = planTaskLog[todayKey] ?? null;
+
+  const nutritionTaskTexts = getNutritionTaskTexts(planDetails.nutrition);
+  const planDetailsKey = [
+    ...planDetails.training.instructions,
+    ...planDetails.recovery.instructions,
+    ...planDetails.mobility.instructions,
+    ...nutritionTaskTexts,
+  ].join("\u0000");
+
+  useEffect(() => {
+    const fresh = buildPlanTasks(todayKey, planDetails, nutritionTaskTexts, false);
+    if (!storedPlanTasks) { setPlanTaskLog(todayKey, fresh); return; }
+    const storedKey = storedPlanTasks.map((t) => t.text).join("\u0000");
+    const freshKey  = fresh.map((t) => t.text).join("\u0000");
+    if (storedKey === freshKey) return;
+    const merged = fresh.map((t) => {
+      const stored = storedPlanTasks.find((s) => s.id === t.id);
+      return stored ? { ...t, completed: stored.completed } : t;
+    });
+    setPlanTaskLog(todayKey, merged);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [todayKey, planDetailsKey]);
+
+  const handleTogglePlanTask = (taskId: string) => {
+    togglePlanTask(todayKey, taskId);
+    const current = planTaskLog[todayKey] ?? [];
+    const updated  = current.map((t) => t.id === taskId ? { ...t, completed: !t.completed } : t);
+    upsertPlanTasks(todayKey, updated);
+  };
+
+  // ── Coach label ───────────────────────────────────────────────────────────
+  const modeLabelMap = { hardcore: "HARDCORE COACH", balanced: "BALANCED COACH", recovery: "RECOVERY COACH" };
+  const modeColor    = { hardcore: "#EF4444",         balanced: "#F59E0B",        recovery: "#22C55E"        };
+
+  // ── Yesterday delta label ─────────────────────────────────────────────────
+  const deltaLabel = delta !== null
+    ? ` (${delta >= 0 ? "+" : ""}${delta})`
+    : "";
+
   return (
-    <div className="flex flex-col gap-6 animate-fade-in">
+    <div className="flex flex-col gap-4 animate-fade-in">
+
+      {/* ── Header ────────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold text-text-primary">Recovery Engine</h1>
-          <p className="text-xs text-text-muted mt-0.5 uppercase tracking-wider">{today}</p>
+          <h1 className="text-xl font-bold text-text-primary">
+            {performanceProfile?.primaryGoal ?? "Recovery Engine"}
+          </h1>
+          <p className="text-xs text-text-muted mt-0.5 uppercase tracking-wider">
+            {performanceProfile?.position
+              ? `${performanceProfile.position} · ${today}`
+              : today}
+          </p>
         </div>
         <Link
           href="/log"
           className="flex items-center gap-1.5 text-gold border border-gold/40 rounded-xl px-3 py-2 text-xs font-bold hover:bg-gold/10 transition-colors uppercase tracking-wide"
         >
           <PlusCircle size={13} />
-          Update
+          Log Today
         </Link>
       </div>
 
-      <div className="flex justify-center py-10">
-        <div className="flex flex-col items-center gap-4">
-          <div className="h-52 w-52 rounded-full border-2 border-dashed border-bg-border flex items-center justify-center">
-            <span className="text-6xl font-bold text-text-muted/30">—</span>
+      {/* ── Event countdown ───────────────────────────────────────────────── */}
+      {performanceProfile?.eventDate && (() => {
+        const daysUntil = Math.ceil(
+          (new Date(performanceProfile.eventDate + "T12:00:00").getTime() - Date.now()) / 86400000
+        );
+        if (daysUntil < 0) return null;
+        const isImminient  = daysUntil <= 7;
+        const isTaper      = daysUntil <= 21 && daysUntil > 7;
+        const urgencyColor = isImminient ? "#EF4444" : "#F59E0B";
+        return (
+          <div
+            className="rounded-2xl border px-4 py-3 flex items-center justify-between"
+            style={{ borderColor: `${urgencyColor}30`, backgroundColor: `${urgencyColor}08` }}
+          >
+            <div>
+              <p className="text-xs font-bold uppercase tracking-widest" style={{ color: urgencyColor }}>
+                {isImminient ? "🏁 Race Week" : isTaper ? "📉 Taper Period" : "🎯 Next Event"}
+              </p>
+              <p className="text-xs text-text-muted mt-0.5">
+                {format(new Date(performanceProfile.eventDate + "T12:00:00"), "MMMM d, yyyy")}
+              </p>
+            </div>
+            <div className="text-right">
+              <span className="text-2xl font-extrabold tabular-nums" style={{ color: urgencyColor }}>
+                {daysUntil}
+              </span>
+              <p className="text-xs text-text-muted">days out</p>
+            </div>
           </div>
-          <p className="text-xs text-text-muted uppercase tracking-widest">No Data Today</p>
+        );
+      })()}
+
+      {/* ── Score rings ───────────────────────────────────────────────────── */}
+      <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+        <RecoveryScoreRing score={displayScore}   confidence="Low" size={200} animated         label="Recovery"  colorVariant="muted" />
+        <RecoveryScoreRing score={readinessScore} confidence="Low" size={200} animated={false} label="Readiness" colorVariant="muted" />
+      </div>
+
+      {/* ── Estimated badge + yesterday comparison ────────────────────────── */}
+      <div className="flex flex-col items-center gap-1.5">
+        <div className="flex items-center gap-2 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-1.5">
+          <span className="text-[10px] font-bold uppercase tracking-widest text-amber-400">Estimated</span>
+          <span className="text-[10px] text-text-muted">
+            {hasHistory
+              ? `based on your profile and recent trends${daysAgo > 1 ? ` · ${daysAgo}d ago` : ""}`
+              : "based on your profile"}
+          </span>
+        </div>
+        {yesterdayScore !== null && (
+          <p className="text-xs text-text-muted">
+            Yesterday: <span className="text-text-secondary font-semibold">{yesterdayScore}</span>
+            <span className={delta !== null && delta >= 0 ? "text-emerald-400" : "text-red-400"}>
+              {deltaLabel}
+            </span>
+          </p>
+        )}
+        <p className="text-[10px] text-text-muted/60 uppercase tracking-widest">
+          Log today's data to get your precise score
+        </p>
+      </div>
+
+      {/* ── Coach insight ─────────────────────────────────────────────────── */}
+      <div className="bg-bg-card border border-bg-border rounded-2xl p-4">
+        <div className="flex items-center gap-2 mb-2">
+          <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: modeColor[coachMode] }} />
+          <span className="text-xs font-bold uppercase tracking-widest" style={{ color: modeColor[coachMode] }}>
+            {modeLabelMap[coachMode]}
+          </span>
+        </div>
+        <p className="text-sm text-text-primary leading-relaxed font-medium">
+          {readinessLabel === "OPTIMAL"
+            ? "You're tracking well. No data logged yet — your estimated score looks strong. Log today to confirm."
+            : readinessLabel === "GOOD"
+            ? "Solid baseline coming in today. Log your sleep and training data to sharpen your score."
+            : readinessLabel === "CAUTION"
+            ? "Trending cautious based on recent data. Prioritise recovery today and log your metrics to get a precise read."
+            : "Recent data suggests fatigue is accumulating. Treat today as a recovery day until you log fresh data."}
+        </p>
+      </div>
+
+      {/* ── What You Should Do Today ──────────────────────────────────────── */}
+      <div className="bg-bg-card border border-gold/20 rounded-2xl p-4 flex flex-col gap-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xs font-bold text-text-primary uppercase tracking-widest">
+            What You Should Do Today
+          </h2>
+          <span className="text-xs font-bold text-gold uppercase tracking-wider">Personalized</span>
+        </div>
+        <div className="flex flex-col gap-2">
+          {recommendations.slice(0, 3).map((rec) => (
+            <ModalityCard key={rec.id} rec={rec} />
+          ))}
         </div>
       </div>
 
+      {/* ── Today's Plan ──────────────────────────────────────────────────── */}
+      <TodaysPlanCard
+        plan={dailyPlan}
+        details={planDetails}
+        tasks={storedPlanTasks ?? []}
+        onToggle={handleTogglePlanTask}
+      />
+
+      {/* ── Mood picker ───────────────────────────────────────────────────── */}
+      <MoodPicker value={todayMood} onChange={onMoodChange} />
+
+      {/* ── Training impact (if plan exists) ─────────────────────────────── */}
+      {trainingPlan && (
+        <div className="bg-bg-card border border-bg-border rounded-2xl p-4 flex flex-col gap-2">
+          <div className="flex items-center gap-2 mb-1">
+            <Dumbbell size={13} className="text-text-secondary" />
+            <span className="text-xs font-bold text-text-secondary uppercase tracking-widest">
+              How Training Affects Your Score
+            </span>
+          </div>
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex-1">
+              <p className="text-xs text-text-secondary font-medium uppercase tracking-wider mb-0.5">Today</p>
+              <p className="text-xs text-text-secondary">{recSummary.today}</p>
+            </div>
+            {todayPlan && (
+              <span
+                className="text-xs font-bold px-2 py-0.5 rounded-full uppercase tracking-wide shrink-0"
+                style={{ backgroundColor: `${TYPE_COLOR[todayPlan.training_type]}20`, color: TYPE_COLOR[todayPlan.training_type] }}
+              >
+                {TYPE_LABEL[todayPlan.training_type]}
+              </span>
+            )}
+          </div>
+          <div className="h-px bg-bg-border" />
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex-1">
+              <p className="text-xs text-text-secondary font-medium uppercase tracking-wider mb-0.5">Tomorrow</p>
+              <p className="text-xs text-text-secondary">{recSummary.tomorrow}</p>
+            </div>
+            {tomorrowPlan && (
+              <span
+                className="text-xs font-bold px-2 py-0.5 rounded-full uppercase tracking-wide shrink-0"
+                style={{ backgroundColor: `${TYPE_COLOR[tomorrowPlan.training_type]}20`, color: TYPE_COLOR[tomorrowPlan.training_type] }}
+              >
+                {TYPE_LABEL[tomorrowPlan.training_type]}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Trends + Labs links ───────────────────────────────────────────── */}
+      <Link
+        href="/trends"
+        className="flex items-center justify-between bg-bg-card border border-bg-border rounded-2xl p-4 hover:border-text-muted/40 transition-colors"
+      >
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-bg-elevated flex items-center justify-center">
+            <TrendingUp size={16} className="text-text-secondary" />
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-text-primary">View Trends</p>
+            <p className="text-xs text-text-muted mt-0.5">30-day history and insights</p>
+          </div>
+        </div>
+        <ChevronRight size={16} className="text-text-muted" />
+      </Link>
+
+      <Link
+        href="/bloodwork"
+        className="flex items-center justify-between bg-bg-card border border-bg-border rounded-2xl p-4 hover:border-text-muted/40 transition-colors"
+      >
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-bg-elevated flex items-center justify-center">
+            <FlaskConical size={16} className="text-text-secondary" />
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-text-primary">
+              {latestBloodwork ? "Blood Lab Results" : "Add Lab Results"}
+            </p>
+            <p className="text-xs text-text-muted mt-0.5">
+              {latestBloodwork
+                ? `Last tested ${format(new Date(latestBloodwork.date + "T12:00:00"), "M/d/yyyy")}`
+                : "Upload blood tests to improve score accuracy"}
+            </p>
+          </div>
+        </div>
+        <ChevronRight size={16} className="text-text-muted" />
+      </Link>
+
+      {/* ── Log CTA ───────────────────────────────────────────────────────── */}
       <Link
         href="/log"
         className="w-full py-4 rounded-2xl bg-gold text-bg-primary text-sm font-bold uppercase tracking-wider text-center hover:bg-gold-light transition-colors block"
       >
         Log Today's Data
       </Link>
+
     </div>
   );
 }
