@@ -91,6 +91,62 @@ function ScoreCard({
   );
 }
 
+// ─── Labs prompt card ─────────────────────────────────────────────────────────
+
+/**
+ * Conditional Labs prompt:
+ *   • No bloodwork at all   → "Unlock Better Insights with Labs"
+ *   • Bloodwork > 90 days   → "Update Your Labs" with age shown
+ *   • Bloodwork ≤ 90 days   → null (prompt hidden; existing breakdown card shows insights)
+ */
+function LabsPromptCard({
+  latestRecent,    // most recent entry within 90 days (null = none / all stale)
+  mostRecentAny,   // most recent entry regardless of age (null = never uploaded)
+}: {
+  latestRecent:   { date: string } | null;
+  mostRecentAny:  { date: string } | null;
+}) {
+  // Current labs — no prompt needed
+  if (latestRecent) return null;
+
+  const hasStale  = mostRecentAny !== null;
+  const daysOld   = hasStale
+    ? Math.round((Date.now() - new Date(mostRecentAny!.date + "T12:00:00").getTime()) / 86400000)
+    : null;
+
+  const accentColor = hasStale ? "border-amber-500/30 bg-amber-500/6" : "border-bg-border bg-bg-card";
+  const iconColor   = hasStale ? "text-amber-400" : "text-text-secondary";
+  const title       = hasStale ? "Update Your Labs" : "Unlock Better Insights with Labs";
+  const description = hasStale
+    ? `Your last results are ${daysOld} days old. Refreshed labs improve your recovery, training load, and nutrition targets.`
+    : "Upload your bloodwork to personalise your recovery, training load, and nutrition recommendations — and add up to 12 pts to your score.";
+  const btnLabel = hasStale ? "Update Labs" : "Upload Labs";
+
+  return (
+    <div className={`rounded-2xl border p-4 flex flex-col gap-3 ${accentColor}`}>
+      <div className="flex items-start gap-3">
+        <div className="w-9 h-9 rounded-xl bg-bg-elevated flex items-center justify-center shrink-0">
+          <FlaskConical size={16} className={iconColor} />
+        </div>
+        <div className="flex-1">
+          <p className="text-sm font-bold text-text-primary">{title}</p>
+          <p className="text-xs text-text-muted mt-1 leading-relaxed">{description}</p>
+        </div>
+      </div>
+      <Link
+        href="/bloodwork"
+        className={`w-full py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider text-center transition-colors ${
+          hasStale
+            ? "bg-amber-500/15 border border-amber-500/30 text-amber-400 hover:bg-amber-500/25"
+            : "bg-gold/10 border border-gold/30 text-gold hover:bg-gold/20"
+        }`}
+      >
+        {btnLabel}
+      </Link>
+    </div>
+  );
+}
+
 // ─── Mood picker ──────────────────────────────────────────────────────────
 
 const MOOD_EMOJI = ["😔", "😕", "😐", "🙂", "😄"] as const;
@@ -911,6 +967,10 @@ export default function Dashboard() {
   const moodLog            = useStore((s) => s.moodLog);
   const setMood            = useStore((s) => s.setMood);
   const latestBloodwork    = useLatestBloodwork(90);
+  const allBloodwork       = useStore((s) => s.bloodwork);
+  const mostRecentAnyBw    = allBloodwork.length > 0
+    ? allBloodwork.slice().sort((a, b) => b.date.localeCompare(a.date))[0]
+    : null;
   const performanceProfile = useStore((s) => s.performanceProfile);
 
   const today    = format(new Date(), "EEEE, MMMM d").toUpperCase();
@@ -933,7 +993,14 @@ export default function Dashboard() {
 
   // ── 1. NEW USER ───────────────────────────────────────────────────────────
   if (isNewUser) {
-    return <NewUserState today={today} trainingPlan={trainingPlan} />;
+    return (
+      <NewUserState
+        today={today}
+        trainingPlan={trainingPlan}
+        latestRecent={latestBloodwork}
+        mostRecentAny={mostRecentAnyBw}
+      />
+    );
   }
 
   // ── 2. BASELINE (profile/history exists, nothing logged today) ────────────
@@ -956,6 +1023,7 @@ export default function Dashboard() {
         todayPlan={todayPlan}
         tomorrowPlan={tomorrowPlan}
         latestBloodwork={latestBloodwork}
+        mostRecentAnyBw={mostRecentAnyBw}
         bwModifier={bwModifier}
         todayMood={moodLog[todayKey] ?? null}
         onMoodChange={handleMoodChange}
@@ -972,6 +1040,7 @@ export default function Dashboard() {
       coachMode={coachingPrefs.mode}
       today={today}
       latestBloodwork={latestBloodwork}
+      mostRecentAnyBw={mostRecentAnyBw}
       trainingPlan={trainingPlan}
       todayMood={moodLog[todayKey] ?? null}
       performanceProfile={performanceProfile}
@@ -986,6 +1055,7 @@ function DashboardContent({
   coachMode,
   today,
   latestBloodwork,
+  mostRecentAnyBw,
   trainingPlan,
   todayMood,
   performanceProfile,
@@ -996,6 +1066,7 @@ function DashboardContent({
   coachMode:           "hardcore" | "balanced" | "recovery";
   today:               string;
   latestBloodwork:     ReturnType<typeof useLatestBloodwork>;
+  mostRecentAnyBw:     { date: string } | null;
   trainingPlan:        TrainingPlan | null;
   todayMood:           number | null;
   performanceProfile:  import("@/lib/types").PerformanceProfile | null;
@@ -1274,6 +1345,9 @@ function DashboardContent({
         adjustedScore={todayScore.adjustedScore}
       />
 
+      {/* ── Labs prompt — shown only when labs are absent or stale ──────── */}
+      <LabsPromptCard latestRecent={latestBloodwork} mostRecentAny={mostRecentAnyBw} />
+
       {/* ══════════════════════════════════════════════════════════════════
           2. HOW DO YOU FEEL TODAY — immediately below score
           ══════════════════════════════════════════════════════════════════ */}
@@ -1539,9 +1613,13 @@ const SCORE_INPUTS = [
 function NewUserState({
   today,
   trainingPlan,
+  latestRecent,
+  mostRecentAny,
 }: {
-  today:        string;
-  trainingPlan: TrainingPlan | null;
+  today:         string;
+  trainingPlan:  TrainingPlan | null;
+  latestRecent:  { date: string } | null;
+  mostRecentAny: { date: string } | null;
 }) {
   const [expanded, setExpanded] = useState<number | null>(null);
 
@@ -1694,6 +1772,9 @@ function NewUserState({
         </Link>
       </div>
 
+      {/* ── Labs prompt (inline in onboarding) ───────────────────────────── */}
+      <LabsPromptCard latestRecent={latestRecent} mostRecentAny={mostRecentAny} />
+
       {/* ── Footer note ───────────────────────────────────────────────────── */}
       <p className="text-[10px] text-text-muted/50 text-center leading-relaxed pb-2">
         Your score updates each time you log data. The more inputs you provide, the higher the confidence.
@@ -1719,6 +1800,7 @@ function BaselineState({
   todayPlan,
   tomorrowPlan,
   latestBloodwork,
+  mostRecentAnyBw,
   bwModifier,
   todayMood,
   onMoodChange,
@@ -1732,6 +1814,7 @@ function BaselineState({
   todayPlan:         TrainingDay | null;
   tomorrowPlan:      TrainingDay | null;
   latestBloodwork:   ReturnType<typeof useLatestBloodwork>;
+  mostRecentAnyBw:   { date: string } | null;
   bwModifier:        number;
   todayMood:         number | null;
   onMoodChange:      (v: number) => void;
@@ -1923,6 +2006,9 @@ function BaselineState({
           Log today's data to get your precise score
         </p>
       </div>
+
+      {/* ── Labs prompt ───────────────────────────────────────────────────── */}
+      <LabsPromptCard latestRecent={latestBloodwork} mostRecentAny={mostRecentAnyBw} />
 
       {/* ── How do you feel today? ────────────────────────────────────────── */}
       <div className="flex flex-col gap-1.5">
